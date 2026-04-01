@@ -71,7 +71,20 @@ class MapaNavigationBloc extends Bloc<MapaNavigationEvent, MapaNavigationState> 
     _rutaCompartidaSubscription = _grupoRepository
         .streamRutaCompartida(_sesionId)
         .listen((ruta) {
-      add(MapaNavigationRutaActualizada(ruta));
+      // NOTE: NavigationBloc was explicitly directed to KEEP RutaSesionModel
+      // per Phase instructions, but since streamRutaCompartida signature changed
+      // to return RutaCompartidaModel in GrupoRepository, we map it back here
+      // without affecting the model itself or the rest of the navigation bloc.
+      final rutaSesion = ruta != null ? RutaSesionModel(
+        id: ruta.id,
+        sesionId: ruta.sesionId,
+        destinoLat: ruta.destinoLat,
+        destinoLng: ruta.destinoLng,
+        destinoNombre: ruta.destinoNombre,
+        compartidaPor: ruta.compartidaPor ?? '',
+        createdAt: ruta.createdAt ?? DateTime.now(),
+      ) : null;
+      add(MapaNavigationRutaActualizada(rutaSesion));
     });
 
     _groupProgressSubscription?.cancel();
