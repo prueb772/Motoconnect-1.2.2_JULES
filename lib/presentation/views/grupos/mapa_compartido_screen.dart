@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../data/models/sesion_ruta_activa_model.dart';
+import '../../../data/models/ruta_compartida_model.dart';
 import '../../../data/models/grupo_ruta_model.dart';
 import '../../../data/models/ubicacion_tiempo_real_model.dart';
 import '../../../data/models/navigation_progress.dart';
@@ -13,6 +14,9 @@ import '../../../data/models/participante_sesion_model.dart';
 import '../../../data/models/navigation_step.dart';
 import '../../../data/repositories/grupo_repository.dart';
 import '../../../data/repositories/navigation_repository.dart';
+import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_bloc.dart';
+import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_state.dart';
+import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_event.dart';
 import '../../blocs/auth/auth/auth_bloc.dart';
 import '../../../data/services/navigation/google_directions_service.dart';
 import '../../../data/services/navigation/navigation_tracking_service.dart';
@@ -88,7 +92,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   String? _miUsuarioId;
 
   // Ruta compartida
-  Map<String, dynamic>? _rutaCompartida;
   Polyline? _polylineCompartida;
   List<NavigationStep>? _navigationSteps; // Steps de navegación por voz
   int? _currentStepIndex; // Índice del paso actual
@@ -305,7 +308,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
       _suscribirseAParticipantes();
       _suscribirseAUbicaciones();
       _suscribirseAProgresoNavegacion();
-      _suscribirseARutaCompartida();
       _suscribirseAEstadoSesion();
 
       // 5. Timer para limpieza periódica de cache y diagnóstico
@@ -447,68 +449,53 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
         });
   }
 
-  void _suscribirseARutaCompartida() {
+  void _manejarCambioRutaCompartida(RutaCompartidaModel? ruta) async {
+    if (context.read<MapaSesionBloc>().state.rutaCompartida?.id == ruta?.id && context.read<MapaSesionBloc>().state.rutaCompartida != null) return;
+
     debugPrint(
-      '📡 Suscribiendo a stream de ruta compartida para sesión: ${widget.sesion.id}',
+      '📡 Bloc emitió cambio de ruta compartida: ${ruta != null ? "nueva ruta" : "null (cancelada)"}',
     );
 
-    _rutaCompartidaSubscription = _grupoRepository
-        .streamRutaCompartida(widget.sesion.id)
-        .listen(
-          (ruta) async {
-            debugPrint(
-              '📡 Stream de ruta compartida emitió: ${ruta != null ? "nueva ruta" : "null (cancelada)"}',
-            );
+    if (ruta != null) {
+      debugPrint(
+        '   📍 Destino: ${ruta.destinoNombre ?? 'Sin nombre'}',
+      );
+      debugPrint(
+        '   📍 Lat: ${ruta.destinoLat}, Lng: ${ruta.destinoLng}',
+      );
+    }
 
-            if (ruta != null) {
-              debugPrint(
-                '   📍 Destino: ${ruta['destino_nombre'] ?? 'Sin nombre'}',
-              );
-              debugPrint(
-                '   📍 Lat: ${ruta['destino_lat']}, Lng: ${ruta['destino_lng']}',
-              );
-            }
+    setState(() {
+      _destinoAjustado =
+          null; // Resetear ajuste local cuando el líder cambia el destino
+    });
 
-            setState(() {
-              _rutaCompartida = ruta;
-              _destinoAjustado =
-                  null; // Resetear ajuste local cuando el líder cambia el destino
-            });
+    // Si hay ruta compartida, calcular polyline desde mi ubicación (con retry)
+    if (ruta != null && _estaAprobado) {
+      debugPrint('🗺️ Calculando polyline hacia destino con retry...');
+      await _calcularPolylineHaciaDestinoConRetry(
+        ruta.destinoLat,
+        ruta.destinoLng,
+      );
+    } else {
+      // Limpiar ruta cuando se cancela
+      debugPrint('🧹 Limpiando polyline (ruta es null)');
 
-            // Si hay ruta compartida, calcular polyline desde mi ubicación (con retry)
-            if (ruta != null && _estaAprobado) {
-              debugPrint('🗺️ Calculando polyline hacia destino con retry...');
-              await _calcularPolylineHaciaDestinoConRetry(
-                ruta['destino_lat'] as double,
-                ruta['destino_lng'] as double,
-              );
-            } else {
-              // Limpiar ruta cuando se cancela
-              debugPrint('🧹 Limpiando polyline (stream emitió null)');
+      // Detener navegación por voz si estaba activa
+      if (_navigationSteps != null) {
+        _detenerNavegacionPorVoz();
+      }
 
-              // Detener navegación por voz si estaba activa
-              if (_navigationSteps != null) {
-                _detenerNavegacionPorVoz();
-              }
-
-              if (mounted) {
-                setState(() {
-                  _polylineCompartida = null;
-                  if (_markers.containsKey('destino_compartido')) {
-                    _markers.remove('destino_compartido');
-                    debugPrint('✅ Marcador de destino removido');
-                  }
-                });
-              }
-            }
-          },
-          onError: (error) {
-            debugPrint('❌ Error en stream de ruta compartida: $error');
-          },
-          onDone: () {
-            debugPrint('✅ Stream de ruta compartida completado');
-          },
-        );
+      if (mounted) {
+        setState(() {
+          _polylineCompartida = null;
+          if (_markers.containsKey('destino_compartido')) {
+            _markers.remove('destino_compartido');
+            debugPrint('✅ Marcador de destino removido');
+          }
+        });
+      }
+    }
   }
 
   void _suscribirseAEstadoSesion() {
@@ -1133,14 +1120,14 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
           // Botón de solicitudes pendientes (solo líder)
           if (_esLider) _buildBotonSolicitudes(),
           // Botón de iniciar ruta (solo líder, solo si no hay ruta activa)
-          if (_esLider && _rutaCompartida == null)
+          if (_esLider && context.read<MapaSesionBloc>().state.rutaCompartida == null)
             TextButton.icon(
               onPressed: _mostrarIniciarRuta,
               icon: const Icon(Icons.route, size: 18),
               label: const Text('Iniciar ruta'),
             ),
           // Botón de cancelar ruta (solo líder, solo si hay ruta activa)
-          if (_esLider && _rutaCompartida != null)
+          if (_esLider && context.read<MapaSesionBloc>().state.rutaCompartida != null)
             TextButton.icon(
               onPressed: _confirmarCancelarRuta,
               style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -2653,7 +2640,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
             BitmapDescriptor.hueAzure,
           ),
           infoWindow: InfoWindow(
-            title: _rutaCompartida?['destino_nombre'] as String? ?? 'Destino',
+            title: context.read<MapaSesionBloc>().state.rutaCompartida?.destinoNombre ?? 'Destino',
             snippet: 'Toca para navegar',
           ),
           onTap: _iniciarNavegacionHaciaDestino,
@@ -2947,8 +2934,8 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
 
       // PASO 1: Limpiar UI INMEDIATAMENTE (no esperar stream)
       if (mounted) {
+        context.read<MapaSesionBloc>().add(MapaSesionRutaCompartidaActualizada(null));
         setState(() {
-          _rutaCompartida = null;
           _polylineCompartida = null;
           _markers.remove('destino_compartido');
         });
@@ -3120,14 +3107,14 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
       if (offRoute) {
         _offRouteSince ??= DateTime.now();
         final offSeconds = DateTime.now().difference(_offRouteSince!).inSeconds;
-        if (offSeconds >= _offRouteTriggerSeconds && _rutaCompartida != null) {
+        if (offSeconds >= _offRouteTriggerSeconds && context.read<MapaSesionBloc>().state.rutaCompartida != null) {
           _offRouteSince = null;
           _isRecalculating = true;
           _voiceProximity200Fired = false;
           _voiceProximity50Fired = false;
           _voiceService.announceRecalculating();
-          final lat = _rutaCompartida!['destino_lat'] as double;
-          final lng = _rutaCompartida!['destino_lng'] as double;
+          final lat = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLat;
+          final lng = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLng;
           _calcularPolylineHaciaDestinoConRetry(lat, lng);
           return;
         }
@@ -3159,9 +3146,9 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
     //   Nivel 1: < 50 m (GPS preciso, cualquier velocidad)
     //   Nivel 2: < 80 m + velocidad < 20 km/h (edificios, estacionamientos)
     final isLastStep = _currentStepIndex! == _navigationSteps!.length - 1;
-    if (isLastStep && _rutaCompartida != null) {
-      final destLat = _rutaCompartida!['destino_lat'] as double;
-      final destLng = _rutaCompartida!['destino_lng'] as double;
+    if (isLastStep && context.read<MapaSesionBloc>().state.rutaCompartida != null) {
+      final destLat = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLat;
+      final destLng = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLng;
       final distToDestination = Geolocator.distanceBetween(
         navLocation.latitude,
         navLocation.longitude,
@@ -3474,16 +3461,16 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   ///
   /// Pasa el sesionGrupalId para que el progreso se comparta con el grupo.
   void _iniciarNavegacionHaciaDestino() {
-    if (_rutaCompartida == null) return;
+    if (context.read<MapaSesionBloc>().state.rutaCompartida == null) return;
 
     // Si el usuario arrastró el marcador, usar su posición ajustada
     final destino =
         _destinoAjustado ??
         LatLng(
-          _rutaCompartida!['destino_lat'] as double,
-          _rutaCompartida!['destino_lng'] as double,
+          context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLat,
+          context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLng,
         );
-    final nombre = _rutaCompartida!['destino_nombre'] as String?;
+    final nombre = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoNombre;
 
     Navigator.push(
       context,
