@@ -1,0 +1,245 @@
+Table usuarios {
+  id uuid [pk]
+  correo text [not null]
+  nombre text [not null]
+  modelo_moto text
+  foto_perfil_url text
+  apodo text
+  color_mapa integer [default: 0]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+Table grupos_ruta {
+  id uuid [pk]
+  nombre text [not null]
+  descripcion text
+  codigo_invitacion text [unique, not null]
+  creado_por uuid [not null, ref: > usuarios.id]
+  activo boolean [default: true]
+  foto_url text
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+Table miembros_grupo {
+  id uuid [pk]
+  grupo_id uuid [not null, ref: > grupos_ruta.id]
+  usuario_id uuid [not null, ref: > usuarios.id]
+  es_admin boolean [default: false]
+  fecha_union timestamptz [default: `now()`]
+  created_at timestamptz [default: `now()`]
+}
+
+Table solicitudes_grupo {
+  id uuid [pk]
+  grupo_id uuid [not null, ref: > grupos_ruta.id]
+  usuario_id uuid [not null, ref: > usuarios.id]
+  estado text [default: 'pendiente', note: 'pendiente | aprobado | rechazado']
+  fecha_solicitud timestamptz [default: `now()`]
+  fecha_resolucion timestamptz
+  resuelto_por uuid [ref: > usuarios.id]
+  fue_bloqueado_antes boolean [default: false]
+  created_at timestamptz [default: `now()`]
+}
+
+Table usuarios_bloqueados_grupo {
+  id uuid [pk]
+  grupo_id uuid [not null, ref: > grupos_ruta.id]
+  usuario_id uuid [not null, ref: > usuarios.id]
+  bloqueado_por uuid [ref: > usuarios.id]
+  motivo text [note: 'expulsado | abandono']
+  fecha_bloqueo timestamptz [default: `now()`]
+  created_at timestamptz [default: `now()`]
+}
+
+Table eventos {
+  id uuid [pk]
+  titulo text [not null]
+  descripcion text [not null]
+  fecha_hora timestamptz [not null]
+  punto_encuentro text
+  creado_por uuid [not null, ref: > usuarios.id]
+  max_participants integer
+  participants_count integer [default: 0]
+  estado text [default: 'activo', note: 'activo | cancelado | finalizado | borrador']
+  requires_approval boolean [default: false]
+  is_public boolean [default: true]
+  foto_url text
+  punto_encuentro_lat float
+  punto_encuentro_lng float
+  destino text
+  destino_lat float
+  destino_lng float
+  reminder_24h_sent boolean [not null, default: false]
+  reminder_2h_sent boolean [not null, default: false]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+Table evento_grupos {
+  evento_id uuid [not null, ref: > eventos.id]
+  grupo_id uuid [not null, ref: > grupos_ruta.id]
+
+  indexes {
+    (evento_id, grupo_id) [pk]
+  }
+}
+
+Table participantes_eventos {
+  id uuid [pk]
+  evento_id uuid [not null, ref: > eventos.id]
+  usuario_id uuid [not null, ref: > usuarios.id]
+  estado text [default: 'confirmado', note: 'confirmado | posible | no_asiste']
+  fecha_registro timestamptz [default: `now()`]
+  created_at timestamptz [default: `now()`]
+}
+
+Table rutas_realizadas {
+    id uuid [pk]
+    usuario_id uuid [not null, ref: > usuarios.id]
+    nombre_ruta text [not null]
+    descripcion_ruta text
+    fecha timestamptz [default: `now()`]
+    puntos jsonb [not null]
+    distancia_km numeric
+    duracion_minutos integer
+    imagen_url text
+    punto_inicio text
+    punto_fin text
+    tipo_via text
+    valor_paisajistico integer [note: '1-5']
+    puntos_interes jsonb
+    tipo text [not null, default: 'planificada', note: 'planificada: guardada desde el menú de rutas (destino sin navegar) | realizada: trayecto GPS real grabado al finalizar la navegación']                 
+    estado text [default: 'activa', note: 'activa | archivada | borrador']
+    created_at timestamptz [default: `now()`]                                                               
+    updated_at timestamptz [default: `now()`]
+  } 
+
+Table sesiones_ruta_activa {
+  id uuid [pk]
+  grupo_id uuid [not null, ref: > grupos_ruta.id]
+  ruta_id uuid [ref: > rutas_realizadas.id]
+  nombre_sesion text [not null]
+  descripcion text
+  estado text [default: 'activa', note: 'activa | pausada | finalizada']
+  iniciada_por uuid [not null, ref: > usuarios.id]
+  fecha_inicio timestamptz [default: `now()`]
+  fecha_fin timestamptz
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+Table participantes_sesion {
+  id uuid [pk]
+  sesion_id uuid [not null, ref: > sesiones_ruta_activa.id]
+  usuario_id uuid [not null, ref: > usuarios.id]
+  estado_aprobacion text [not null, default: 'pendiente']
+  tracking_activo boolean [default: true]
+  fecha_solicitud timestamptz [default: `now()`]
+  fecha_aprobacion timestamptz
+  aprobado_por uuid [ref: > usuarios.id]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+Table rutas_sesion {
+  id uuid [pk]
+  sesion_id uuid [unique, not null, ref: > sesiones_ruta_activa.id]
+  destino_lat float [not null]
+  destino_lng float [not null]
+  destino_nombre text
+  compartida_por uuid [not null, ref: > usuarios.id]
+  fecha_compartida timestamptz [default: `now()`]
+  created_at timestamptz [default: `now()`]
+}
+
+Table ubicaciones_tiempo_real {
+  id uuid [pk]
+  sesion_id uuid [not null, ref: > sesiones_ruta_activa.id]
+  usuario_id uuid [not null, ref: > usuarios.id]
+  latitud numeric [not null]
+  longitud numeric [not null]
+  velocidad numeric
+  direccion numeric
+  altitud numeric
+  precision_metros numeric
+  ultima_actualizacion timestamptz [default: `now()`]
+  created_at timestamptz [default: `now()`]
+}
+
+Table sesiones_navegacion {
+  id uuid [pk]
+  usuario_id uuid [ref: > usuarios.id]
+  sesion_grupal_id uuid [ref: > sesiones_ruta_activa.id]
+  origen_lat float [not null]
+  origen_lng float [not null]
+  destino_lat float [not null]
+  destino_lng float [not null]
+  destino_nombre text
+  steps jsonb [not null]
+  polyline jsonb [not null]
+  distancia_total_metros float [not null]
+  duracion_total_segundos integer [not null]
+  estado text [not null, default: 'planning']
+  paso_actual integer [default: 0]
+  distancia_recorrida_metros float [default: 0]
+  fecha_inicio timestamptz [default: `now()`]
+  fecha_fin timestamptz
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+Table progreso_navegacion_tiempo_real {
+  id uuid [pk]
+  sesion_navegacion_id uuid [ref: > sesiones_navegacion.id]
+  usuario_id uuid [ref: > usuarios.id]
+  paso_actual integer [not null]
+  ubicacion_lat float [not null]
+  ubicacion_lng float [not null]
+  distancia_siguiente_paso float
+  eta_segundos integer
+  distancia_restante_metros float
+  ultima_actualizacion timestamptz [default: `now()`]
+  created_at timestamptz [default: `now()`]
+}
+
+Table talleres {
+  id uuid [pk]
+  nombre text [not null]
+  direccion text
+  telefono text
+  horario text
+  latitud numeric
+  longitud numeric
+  creado_por uuid [ref: > usuarios.id]
+  created_at timestamptz [default: `now()`]
+}
+
+Table comentarios_comunidad {
+  id uuid [pk]
+  usuario_id uuid [not null, ref: > usuarios.id]
+  contenido text
+  titulo text
+  tipo text [not null, default: 'texto', note: 'texto | ruta_compartida | evento_compartido | imagen | video']
+  fecha timestamptz [default: `now()`]
+  imagen_url text
+  media_url text
+  categoria text
+  referencia_ruta_id uuid [ref: > rutas_realizadas.id]
+  referencia_evento_id uuid [ref: > eventos.id]
+  referencia_taller_id uuid [ref: > talleres.id]
+  likes_count integer [default: 0]
+  comentarios_count integer [default: 0]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+}
+
+Table fcm_tokens {
+  id uuid [pk]
+  usuario_id uuid [not null, ref: > usuarios.id]
+  token text [not null]
+  plataforma text [not null, default: 'android']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
