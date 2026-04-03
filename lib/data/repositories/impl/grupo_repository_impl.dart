@@ -19,6 +19,7 @@ import '../../models/miembro_grupo_model.dart';
 import '../../models/sesion_ruta_activa_model.dart';
 import '../../models/ubicacion_tiempo_real_model.dart';
 import '../../models/participante_sesion_model.dart';
+import '../../models/ruta_compartida_model.dart';
 import '../../models/ruta_sesion_model.dart';
 import '../../models/solicitud_grupo_model.dart';
 
