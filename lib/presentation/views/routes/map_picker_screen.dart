@@ -7,31 +7,48 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:google_place/google_place.dart';
 
-class MapPickerScreen extends StatefulWidget {
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../blocs/routes/map_picker/map_picker_bloc.dart';
+import '../../blocs/routes/map_picker/map_picker_event.dart';
+import '../../blocs/routes/map_picker/map_picker_state.dart';
+import '../../../data/models/routes/map_picker_args.dart';
+
+class MapPickerScreen extends StatelessWidget {
+  const MapPickerScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final args = ModalRoute.of(context)!.settings.arguments as MapPickerArgs?;
+
+    return BlocProvider(
+      create: (context) => MapPickerBloc(
+        mapPickerService: MapPickerService(),
+      ),
+      child: _MapPickerScreenView(
+        initialPosition: args?.initialPosition,
+        initialSearchQuery: args?.initialSearchQuery,
+      ),
+    );
+  }
+}
+
+class _MapPickerScreenView extends StatefulWidget {
   final LatLng? initialPosition;
   final String? initialSearchQuery;
 
-  const MapPickerScreen({
+  const _MapPickerScreenView({
     super.key,
     this.initialPosition,
     this.initialSearchQuery,
   });
 
   @override
-  State<MapPickerScreen> createState() => _MapPickerScreenState();
+  State<_MapPickerScreenView> createState() => _MapPickerScreenViewState();
 }
 
-class _MapPickerScreenState extends State<MapPickerScreen> {
+class _MapPickerScreenViewState extends State<_MapPickerScreenView> {
   GoogleMapController? _mapController;
-  LatLng? _pickedLocation;
-  Marker? _marker;
-  String _currentAddress = "Mueve el mapa o busca una dirección";
-  bool _isLoadingAddress = false;
 
-  /// Servicio de búsqueda y geocodificación (inyectado)
-  final MapPickerService _mapPickerService = MapPickerService();
-
-  List<AutocompletePrediction> _placePredictions = [];
   final TextEditingController _searchController = TextEditingController();
 
   final LatLng _defaultInitialPiedecuesta = const LatLng(7.0039, -73.0530);
@@ -39,30 +56,17 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   @override
   void initState() {
     super.initState();
-    if (!_mapPickerService.isSearchAvailable) {
-      debugPrint(
-        "ADVERTENCIA: Google API Key no configurada para MapPickerScreen. "
-        "La búsqueda de lugares no funcionará.",
-      );
-    }
 
-    if (widget.initialPosition != null) {
-      _pickedLocation = widget.initialPosition;
-      _updateMarkerAndAddress(
-        _pickedLocation!,
-        fromSearch: widget.initialSearchQuery != null,
-      );
-    } else {
-      _requestPermissionAndGetCurrentLocation();
-    }
-
-    if (widget.initialSearchQuery != null &&
-        widget.initialSearchQuery!.isNotEmpty) {
+    if (widget.initialSearchQuery != null && widget.initialSearchQuery!.isNotEmpty) {
       _searchController.text = widget.initialSearchQuery!;
-      if (_mapPickerService.isSearchAvailable) {
-        _searchPlace(widget.initialSearchQuery!);
-      }
     }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<MapPickerBloc>().add(MapPickerInitialize(
+        initialPosition: widget.initialPosition,
+        initialSearchQuery: widget.initialSearchQuery,
+      ));
+    });
   }
 
   Future<void> _requestPermissionAndGetCurrentLocation() async {
@@ -80,7 +84,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         }
       } catch (e) {
         debugPrint("Error obteniendo ubicación actual: $e");
-        if (mounted && _mapController != null && _pickedLocation == null) {
+        if (mounted && _mapController != null) {
           _mapController!.animateCamera(
             CameraUpdate.newLatLngZoom(_defaultInitialPiedecuesta, 13),
           );
@@ -88,7 +92,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       }
     } else {
       debugPrint("Permiso de ubicación denegado.");
-      if (mounted && _mapController != null && _pickedLocation == null) {
+      if (mounted && _mapController != null) {
         _mapController!.animateCamera(
           CameraUpdate.newLatLngZoom(_defaultInitialPiedecuesta, 13),
         );
@@ -98,115 +102,38 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
 
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
-    if (_pickedLocation != null) {
+    if (widget.initialPosition != null) {
       _mapController!.animateCamera(
-        CameraUpdate.newLatLngZoom(_pickedLocation!, 16),
+        CameraUpdate.newLatLngZoom(widget.initialPosition!, 16),
       );
-    } else if (widget.initialPosition == null) {
+    } else {
       _requestPermissionAndGetCurrentLocation();
     }
   }
 
-  Future<void> _updateMarkerAndAddress(
-    LatLng position, {
-    String? addressFromSearch,
-    bool fromSearch = false,
-  }) async {
-    if (!mounted) return;
-    setState(() {
-      _pickedLocation = position;
-      _marker = Marker(
-        markerId: const MarkerId('pickedLocation'),
-        position: _pickedLocation!,
-        infoWindow: InfoWindow(
-          title: addressFromSearch ?? 'Ubicación Seleccionada',
-        ),
-        draggable: true,
-        onDragEnd: (newPosition) {
-          _updateMarkerAndAddress(newPosition);
-        },
-      );
-      if (addressFromSearch == null) {
-        _isLoadingAddress = true;
-        _currentAddress = "Obteniendo dirección...";
-      } else {
-        _currentAddress = addressFromSearch;
-        _searchController.text = addressFromSearch;
-      }
-    });
-
-    if (!fromSearch) {
-      _mapController?.animateCamera(CameraUpdate.newLatLng(position));
-    }
-
-    // Geocodificación inversa delegada al servicio
-    if (addressFromSearch == null) {
-      final address = await _mapPickerService.reverseGeocode(
-        position.latitude,
-        position.longitude,
-      );
-      if (mounted) {
-        setState(() {
-          _currentAddress = address ??
-              "No se encontró dirección para esta ubicación.";
-          _searchController.text = _currentAddress;
-          _isLoadingAddress = false;
-        });
-      }
-    } else {
-      if (mounted) {
-        setState(() => _isLoadingAddress = false);
-      }
-    }
-  }
-
   void _onTapMap(LatLng position) {
-    _updateMarkerAndAddress(position);
+    context.read<MapPickerBloc>().add(MapPickerUpdateMarker(position));
+    context.read<MapPickerBloc>().add(MapPickerCleared());
+    _mapController?.animateCamera(CameraUpdate.newLatLng(position));
   }
 
   /// Búsqueda de lugares delegada al servicio
-  Future<void> _searchPlace(String query) async {
-    final predictions = await _mapPickerService.searchPlaces(query);
-    if (mounted) {
-      setState(() => _placePredictions = predictions);
-    }
+  void _searchPlace(String query) {
+    context.read<MapPickerBloc>().add(MapPickerSearchRequested(query));
   }
 
-  Future<void> _selectSearchedPlace(AutocompletePrediction prediction) async {
-    if (prediction.placeId == null) return;
-
-    if (mounted) setState(() => _placePredictions = []);
+  void _selectSearchedPlace(AutocompletePrediction prediction) {
+    context.read<MapPickerBloc>().add(MapPickerSelectSearchedPlace(prediction));
     FocusScope.of(context).unfocus();
-
-    final details = await _mapPickerService.getPlaceDetails(
-      prediction.placeId!,
-    );
-    if (details != null && details.geometry != null) {
-      final lat = details.geometry!.location!.lat!;
-      final lng = details.geometry!.location!.lng!;
-      final newPos = LatLng(lat, lng);
-      final String address =
-          details.formattedAddress ??
-          details.name ??
-          prediction.description ??
-          "Dirección no disponible";
-      _searchController.text = address;
-
-      _updateMarkerAndAddress(
-        newPos,
-        addressFromSearch: address,
-        fromSearch: true,
-      );
-      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(newPos, 16));
-    }
   }
 
-  void _confirmSelection() {
-    if (_pickedLocation != null) {
-      Navigator.pop(context, MapPickerResult(
-        latlng: _pickedLocation!,
-        address: _currentAddress,
-      ));
+  void _confirmSelection(MapPickerState state) {
+    if (state.pickedLocation != null) {
+      final result = MapPickerResult(
+        latlng: state.pickedLocation!,
+        address: state.currentAddress,
+      );
+      context.read<MapPickerBloc>().add(MapPickerLocationConfirmed(result));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -218,29 +145,52 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Seleccionar Ubicación"),
-        actions: [
-          if (_pickedLocation != null)
-            IconButton(
-              icon: const Icon(Icons.check),
-              onPressed: _confirmSelection,
-              tooltip: "Confirmar Ubicación",
-            ),
-        ],
-      ),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            GoogleMap(
-              onMapCreated: _onMapCreated,
-              initialCameraPosition: CameraPosition(
-                target: widget.initialPosition ?? _defaultInitialPiedecuesta,
-                zoom: widget.initialPosition != null ? 16 : 12,
-              ),
-              onTap: _onTapMap,
-              markers: _marker != null ? {_marker!} : {},
+    return BlocListener<MapPickerBloc, MapPickerState>(
+      listenWhen: (previous, current) => current is MapPickerLocationConfirmedState,
+      listener: (context, state) {
+        if (state is MapPickerLocationConfirmedState) {
+          Navigator.pop(context, state.result);
+        }
+      },
+      child: BlocBuilder<MapPickerBloc, MapPickerState>(
+        builder: (context, state) {
+          return Scaffold(
+          appBar: AppBar(
+            title: const Text("Seleccionar Ubicación"),
+            actions: [
+              if (state.pickedLocation != null)
+                IconButton(
+                  icon: const Icon(Icons.check),
+                  onPressed: () => _confirmSelection(state),
+                  tooltip: "Confirmar Ubicación",
+                ),
+            ],
+          ),
+          body: SafeArea(
+            child: Stack(
+              children: [
+                GoogleMap(
+                  onMapCreated: _onMapCreated,
+                  initialCameraPosition: CameraPosition(
+                    target: widget.initialPosition ?? _defaultInitialPiedecuesta,
+                    zoom: widget.initialPosition != null ? 16 : 12,
+                  ),
+                  onTap: _onTapMap,
+                  markers: state.pickedLocation != null
+                      ? {
+                          Marker(
+                            markerId: const MarkerId('pickedLocation'),
+                            position: state.pickedLocation!,
+                            infoWindow: InfoWindow(
+                              title: state.currentAddress,
+                            ),
+                            draggable: true,
+                            onDragEnd: (newPosition) {
+                              context.read<MapPickerBloc>().add(MapPickerUpdateMarker(newPosition));
+                            },
+                          )
+                        }
+                      : {},
               myLocationButtonEnabled: true,
               myLocationEnabled: true,
               mapToolbarEnabled: false,
@@ -272,9 +222,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                                 icon: const Icon(Icons.clear),
                                 onPressed: () {
                                   _searchController.clear();
-                                  if (mounted) {
-                                    setState(() => _placePredictions = []);
-                                  }
+                                  context.read<MapPickerBloc>().add(MapPickerCleared());
                                 },
                               )
                               : null,
@@ -283,27 +231,33 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                     ),
                     onChanged: _searchPlace,
                   ),
-                  if (_placePredictions.isNotEmpty)
-                    Material(
-                      elevation: 2,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxHeight: 200,
-                        ),
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: _placePredictions.length,
-                          itemBuilder: (context, index) {
-                            final prediction = _placePredictions[index];
-                            return ListTile(
-                              leading: const Icon(Icons.pin_drop_outlined),
-                              title: Text(prediction.description ?? ''),
-                              onTap: () => _selectSearchedPlace(prediction),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
+                  BlocBuilder<MapPickerBloc, MapPickerState>(
+                    builder: (context, state) {
+                      if (state is MapPickerLoaded && state.results.isNotEmpty) {
+                        return Material(
+                          elevation: 2,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxHeight: 200,
+                            ),
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: state.results.length,
+                              itemBuilder: (context, index) {
+                                final prediction = state.results[index];
+                                return ListTile(
+                                  leading: const Icon(Icons.pin_drop_outlined),
+                                  title: Text(prediction.description ?? ''),
+                                  onTap: () => _selectSearchedPlace(prediction),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
                 ],
               ),
             ),
@@ -353,9 +307,9 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _isLoadingAddress
+                        state.isLoadingAddress
                             ? "Obteniendo dirección..."
-                            : _currentAddress,
+                            : state.currentAddress,
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ),
@@ -368,14 +322,17 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         ),
       ),
       floatingActionButton:
-          _pickedLocation != null
+          state.pickedLocation != null
               ? FloatingActionButton.extended(
-                onPressed: _confirmSelection,
+                onPressed: () => _confirmSelection(state),
                 label: const Text("Confirmar"),
                 icon: const Icon(Icons.check_circle_outline),
               )
               : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+          );
+        },
+      ),
     );
   }
 }

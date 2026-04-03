@@ -19,6 +19,7 @@ import '../../models/miembro_grupo_model.dart';
 import '../../models/sesion_ruta_activa_model.dart';
 import '../../models/ubicacion_tiempo_real_model.dart';
 import '../../models/participante_sesion_model.dart';
+import '../../models/ruta_compartida_model.dart';
 import '../../models/ruta_sesion_model.dart';
 import '../../models/solicitud_grupo_model.dart';
 
@@ -941,7 +942,7 @@ class GrupoRepositoryImpl implements GrupoRepository {
   }
 
   @override
-  Future<RutaSesionModel?> obtenerRutaCompartida(String sesionId) async {
+  Future<RutaCompartidaModel?> obtenerRutaCompartida(String sesionId) async {
     try {
       final response = await _supabase
           .from('rutas_sesion')
@@ -950,14 +951,14 @@ class GrupoRepositoryImpl implements GrupoRepository {
           .maybeSingle();
 
       if (response == null) return null;
-      return RutaSesionModel.fromJson(response);
+      return RutaCompartidaModel.fromJson(response);
     } catch (e) {
       return null;
     }
   }
 
   @override
-  Stream<RutaSesionModel?> streamRutaCompartida(String sesionId) {
+  Stream<RutaCompartidaModel?> streamRutaCompartida(String sesionId) {
     debugPrint('📡 Creando stream de ruta compartida para sesión: $sesionId');
 
     return _supabase
@@ -975,7 +976,7 @@ class GrupoRepositoryImpl implements GrupoRepository {
           }
 
           debugPrint('📡 Stream: Ruta encontrada para sesión $sesionId');
-          return RutaSesionModel.fromJson(rutasSesion.first);
+          return RutaCompartidaModel.fromJson(rutasSesion.first);
         });
   }
 

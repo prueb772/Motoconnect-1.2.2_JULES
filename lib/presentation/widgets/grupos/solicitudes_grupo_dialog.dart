@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../../../data/models/solicitud_grupo_model.dart';
-import '../../../data/repositories/impl/grupo_repository_impl.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../data/repositories/grupo_repository.dart';
 
 /// Dialog para gestionar solicitudes pendientes de un grupo
@@ -26,16 +26,17 @@ class SolicitudesGrupoDialog extends StatefulWidget {
 }
 
 class _SolicitudesGrupoDialogState extends State<SolicitudesGrupoDialog> {
-  final GrupoRepository _grupoRepository = GrupoRepositoryImpl();
   List<SolicitudGrupoModel> _solicitudes = [];
   bool _isLoading = true;
   final Set<String> _procesando = {};
   StreamSubscription<List<SolicitudGrupoModel>>? _streamSubscription;
 
   @override
-  void initState() {
-    super.initState();
-    _iniciarStream();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_streamSubscription == null) {
+      _iniciarStream();
+    }
   }
 
   @override
@@ -49,7 +50,8 @@ class _SolicitudesGrupoDialogState extends State<SolicitudesGrupoDialog> {
       _isLoading = true;
     });
 
-    _streamSubscription = _grupoRepository
+    final grupoRepository = context.read<GrupoRepository>();
+    _streamSubscription = grupoRepository
         .streamSolicitudesGrupo(widget.grupoId)
         .listen(
       (solicitudes) {
@@ -81,8 +83,9 @@ class _SolicitudesGrupoDialogState extends State<SolicitudesGrupoDialog> {
       _procesando.add(solicitud.id);
     });
 
+    final grupoRepository = context.read<GrupoRepository>();
     try {
-      await _grupoRepository.aprobarSolicitudGrupo(solicitud.id);
+      await grupoRepository.aprobarSolicitudGrupo(solicitud.id);
 
       setState(() {
         _solicitudes.removeWhere((s) => s.id == solicitud.id);
@@ -141,8 +144,9 @@ class _SolicitudesGrupoDialogState extends State<SolicitudesGrupoDialog> {
       _procesando.add(solicitud.id);
     });
 
+    final grupoRepository = context.read<GrupoRepository>();
     try {
-      await _grupoRepository.rechazarSolicitudGrupo(solicitud.id);
+      await grupoRepository.rechazarSolicitudGrupo(solicitud.id);
 
       setState(() {
         _solicitudes.removeWhere((s) => s.id == solicitud.id);

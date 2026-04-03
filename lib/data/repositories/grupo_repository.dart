@@ -25,6 +25,7 @@ import '../models/sesion_ruta_activa_model.dart';
 import '../models/ubicacion_tiempo_real_model.dart';
 import '../models/participante_sesion_model.dart';
 import '../models/ruta_sesion_model.dart';
+import '../models/ruta_compartida_model.dart';
 import '../models/solicitud_grupo_model.dart';
 
 
@@ -219,10 +220,10 @@ abstract class GrupoRepository {
   });
 
   /// Obtener ruta compartida de una sesión
-  Future<RutaSesionModel?> obtenerRutaCompartida(String sesionId);
+  Future<RutaCompartidaModel?> obtenerRutaCompartida(String sesionId);
 
   /// Stream de ruta compartida (tiempo real)
-  Stream<RutaSesionModel?> streamRutaCompartida(String sesionId);
+  Stream<RutaCompartidaModel?> streamRutaCompartida(String sesionId);
 
   /// Eliminar ruta compartida
   Future<void> eliminarRutaCompartida(String sesionId);

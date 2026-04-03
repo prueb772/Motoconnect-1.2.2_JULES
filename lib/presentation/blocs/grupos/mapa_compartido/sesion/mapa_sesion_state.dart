@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 import '../../../../../data/models/participante_sesion_model.dart';
+import '../../../../../data/models/ruta_compartida_model.dart';
 
 enum MapaSesionStatus {
   initial,
@@ -22,6 +23,7 @@ class MapaSesionState extends Equatable {
   final bool estaAprobado;
   final bool trackingPausadoPorUsuario;
   final String miUsuarioId;
+  final RutaCompartidaModel? rutaCompartida;
 
   const MapaSesionState({
     this.status = MapaSesionStatus.initial,
@@ -34,6 +36,7 @@ class MapaSesionState extends Equatable {
     this.estaAprobado = false,
     this.trackingPausadoPorUsuario = false,
     this.miUsuarioId = '',
+    this.rutaCompartida,
   });
 
   MapaSesionState copyWith({
@@ -47,6 +50,7 @@ class MapaSesionState extends Equatable {
     bool? estaAprobado,
     bool? trackingPausadoPorUsuario,
     String? miUsuarioId,
+    RutaCompartidaModel? rutaCompartida,
   }) {
     return MapaSesionState(
       status: status ?? this.status,
@@ -59,6 +63,7 @@ class MapaSesionState extends Equatable {
       estaAprobado: estaAprobado ?? this.estaAprobado,
       trackingPausadoPorUsuario: trackingPausadoPorUsuario ?? this.trackingPausadoPorUsuario,
       miUsuarioId: miUsuarioId ?? this.miUsuarioId,
+      rutaCompartida: rutaCompartida ?? this.rutaCompartida,
     );
   }
 
@@ -74,5 +79,6 @@ class MapaSesionState extends Equatable {
         estaAprobado,
         trackingPausadoPorUsuario,
         miUsuarioId,
+        if (rutaCompartida != null) rutaCompartida!,
       ];
 }

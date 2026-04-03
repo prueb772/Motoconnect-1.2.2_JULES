@@ -295,14 +295,7 @@ class _MotoConnectAppState extends State<MotoConnectApp> {
                   ModalRoute.of(context)!.settings.arguments as String;
               return EventDetailScreen(eventId: eventId);
             },
-            '/map-picker': (context) {
-              final args = ModalRoute.of(context)?.settings.arguments
-                  as Map<String, dynamic>?;
-              return MapPickerScreen(
-                initialPosition: args?['initialPosition'] as LatLng?,
-                initialSearchQuery: args?['initialSearchQuery'] as String?,
-              );
-            },
+            '/map-picker': (context) => const MapPickerScreen(),
           },
         );
       },
