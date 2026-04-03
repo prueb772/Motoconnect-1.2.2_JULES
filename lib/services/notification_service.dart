@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../data/services/api/notification_api_service.dart';
+import '../data/models/notification_payload_model.dart';
 
 /// Canal Android para notificaciones de eventos.
 const _eventosChannel = AndroidNotificationChannel(
@@ -151,7 +152,8 @@ class NotificationService {
     final notification = message.notification;
     if (notification == null) return;
 
-    final type = message.data['type'] as String? ?? '';
+    final payload = NotificationPayloadModel.fromJson(message.data);
+    final type = payload.type ?? '';
     final isSessionNotif = type == 'session' ||
         type == 'session_started' ||
         type == 'member_joined' ||
@@ -159,11 +161,11 @@ class NotificationService {
         type == 'member_left';
 
     // ID estable basado en el identificador relevante para evitar duplicados
-    final refId = message.data['id'] ??
-        message.data['sesion_id'] ??
-        message.data['event_id'] ??
+    final refId = payload.id ??
+        payload.sesionId ??
+        payload.eventId ??
         '';
-    final notifId = (refId as String).isNotEmpty
+    final notifId = refId.isNotEmpty
         ? (type + refId).hashCode.abs()
         : DateTime.now().millisecondsSinceEpoch.remainder(100000);
 
@@ -187,35 +189,35 @@ class NotificationService {
           playSound: true,
         ),
       ),
-      payload: jsonEncode(message.data),
+      payload: jsonEncode(payload.toJson()),
     );
   }
 
   /// Navega al evento cuando el usuario toca la notificación.
   void _handleNotificationTap(RemoteMessage message) {
-    _navigateToEvent(message.data);
+    _navigateToEvent(NotificationPayloadModel.fromJson(message.data));
   }
 
   void _onNotificationTap(NotificationResponse response) {
     if (response.payload == null) return;
     try {
       final data = jsonDecode(response.payload!) as Map<String, dynamic>;
-      _navigateToEvent(data);
+      _navigateToEvent(NotificationPayloadModel.fromJson(data));
     } catch (_) {}
   }
 
-  void _navigateToEvent(Map<String, dynamic> data) {
+  void _navigateToEvent(NotificationPayloadModel payload) {
     if (navigatorKey.currentState == null) return;
 
-    final type = data['type'] as String? ?? '';
+    final type = payload.type ?? '';
 
     // Soporta ambos formatos de payload:
     //   Nuevo:   { "type": "event"|"session", "id": "<uuid>", "grupo_id": "<uuid>" }
     //   Legacy:  { "type": "session_started"|..., "event_id": "...", "sesion_id": "..." }
-    final id = data['id'] as String?;
+    final id = payload.id;
     final eventId =
-        (id != null && id.isNotEmpty) ? id : data['event_id'] as String?;
-    final grupoId = data['grupo_id'] as String?;
+        (id != null && id.isNotEmpty) ? id : payload.eventId;
+    final grupoId = payload.grupoId;
 
     final isSession = type == 'session' ||
         type == 'session_started' ||
@@ -244,7 +246,7 @@ class NotificationService {
   Future<void> checkInitialMessage() async {
     final message = await _fcm.getInitialMessage();
     if (message != null) {
-      _navigateToEvent(message.data);
+      _navigateToEvent(NotificationPayloadModel.fromJson(message.data));
     }
   }
 

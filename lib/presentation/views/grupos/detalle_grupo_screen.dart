@@ -11,6 +11,12 @@ import '../../blocs/grupos/detalle_grupo/detalle_grupo_bloc.dart';
 import '../../widgets/grupos/solicitudes_grupo_dialog.dart';
 import 'editar_grupo_screen.dart';
 import 'mapa_compartido_screen.dart';
+import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_bloc.dart';
+import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_event.dart';
+import '../../blocs/grupos/mapa_compartido/tracking/mapa_tracking_bloc.dart';
+import '../../blocs/grupos/mapa_compartido/tracking/mapa_tracking_event.dart';
+import '../../../data/repositories/auth_repository.dart';
+import '../../../services/location_tracking_service.dart';
 
 /// Pantalla de detalle de un grupo
 ///
@@ -661,9 +667,25 @@ class _DetalleGrupoScreenBodyState extends State<_DetalleGrupoScreenBody>
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => MapaCompartidoScreen(
-          sesion: sesion,
-          grupo: widget.grupo,
+        builder: (context) => MultiBlocProvider(
+          providers: [
+            BlocProvider(
+              create: (context) => MapaSesionBloc(
+                grupoRepository: context.read<GrupoRepository>(),
+                authRepository: context.read<AuthRepository>(),
+              )..add(MapaSesionInicializar(sesion: sesion, grupo: widget.grupo)),
+            ),
+            BlocProvider(
+              create: (context) => MapaTrackingBloc(
+                grupoRepository: context.read<GrupoRepository>(),
+                trackingService: context.read<LocationTrackingService>(),
+              )..add(MapaTrackingIniciar(sesion.id)),
+            ),
+          ],
+          child: MapaCompartidoScreen(
+            sesion: sesion,
+            grupo: widget.grupo,
+          ),
         ),
       ),
     ).then((_) {

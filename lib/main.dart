@@ -49,6 +49,7 @@ import 'data/repositories/taller_repository.dart';
 import 'data/repositories/impl/taller_repository_impl.dart';
 import 'data/models/grupo_ruta_model.dart';
 import 'data/models/ruta_realizada_model.dart';
+import 'data/models/notification_payload_model.dart';
 
 import 'presentation/blocs/theme/theme_cubit.dart';
 import 'presentation/blocs/auth/auth/auth_bloc.dart';
@@ -80,12 +81,13 @@ Future<void> _firebaseBackgroundMessageHandler(RemoteMessage message) async {
     ),
   );
 
-  final type = message.data['type'] as String? ?? '';
-  final refId = message.data['id'] ??
-      message.data['event_id'] ??
-      message.data['sesion_id'] ??
+  final payload = NotificationPayloadModel.fromJson(message.data);
+  final type = payload.type ?? '';
+  final refId = payload.id ??
+      payload.eventId ??
+      payload.sesionId ??
       '';
-  final notifId = (refId as String).isNotEmpty
+  final notifId = refId.isNotEmpty
       ? (type + refId).hashCode.abs()
       : DateTime.now().millisecondsSinceEpoch.remainder(100000);
 
@@ -97,8 +99,8 @@ Future<void> _firebaseBackgroundMessageHandler(RemoteMessage message) async {
 
   await plugin.show(
     notifId,
-    message.data['title'] ?? (isSession ? 'Sesión grupal' : 'Nuevo Evento'),
-    message.data['body'] ?? '',
+    payload.title ?? (isSession ? 'Sesión grupal' : 'Nuevo Evento'),
+    payload.body ?? '',
     NotificationDetails(
       android: AndroidNotificationDetails(
         isSession ? 'sesiones_channel' : 'eventos_channel',
@@ -108,7 +110,7 @@ Future<void> _firebaseBackgroundMessageHandler(RemoteMessage message) async {
       ),
     ),
     // Payload necesario para que _onNotificationTap pueda navegar al tocar
-    payload: jsonEncode(message.data),
+    payload: jsonEncode(payload.toJson()),
   );
 }
 
