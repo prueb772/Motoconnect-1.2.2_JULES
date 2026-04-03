@@ -6,6 +6,7 @@ import '../../../data/models/map_picker_result.dart';
 import '../../../data/repositories/taller_repository.dart';
 import '../../blocs/talleres/talleres_bloc.dart';
 import '../routes/map_picker_screen.dart';
+import '../../../data/models/routes/map_picker_args.dart';
 import '../routes/rutas_screen.dart';
 
 class TalleresScreen extends StatelessWidget {
@@ -284,18 +285,16 @@ class _TalleresView extends StatelessWidget {
                         ),
                         onPressed: () async {
                           final MapPickerResult? result =
-                              await Navigator.push(
+                              await Navigator.pushNamed(
                                 context,
-                                MaterialPageRoute(
-                                  builder:
-                                      (context) => MapPickerScreen(
-                                        initialPosition: selectedLatLng,
-                                        initialSearchQuery:
-                                            selectedAddressString ??
-                                            direccionTextoManualController.text,
-                                      ),
+                                '/map-picker',
+                                arguments: MapPickerArgs(
+                                  initialPosition: selectedLatLng,
+                                  initialSearchQuery:
+                                      selectedAddressString ??
+                                      direccionTextoManualController.text,
                                 ),
-                              );
+                              ) as MapPickerResult?;
 
                           if (result != null) {
                             setDialogState(() {

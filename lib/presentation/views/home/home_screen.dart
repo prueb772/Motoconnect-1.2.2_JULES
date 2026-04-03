@@ -1,18 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../blocs/home/home_bloc.dart';
+import '../../blocs/home/home_event.dart';
+import '../../blocs/home/home_state.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  void _navigate(BuildContext context, String route) {
-    Navigator.pushNamed(context, route);
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (context) => HomeBloc(),
+      child: BlocListener<HomeBloc, HomeState>(
+        listener: (context, state) {
+          if (state is HomeNavigationRequested) {
+            Navigator.pushNamed(context, state.route);
+          }
+        },
+        child: _HomeScreenView(),
+      ),
+    );
   }
+}
 
-  void _navigateToProfile(BuildContext context) {
-    Navigator.pushNamed(
-      context,
-      '/perfil',
-    ); // Asegúrate de crear esta ruta en main.dart
-  }
+class _HomeScreenView extends StatelessWidget {
+  const _HomeScreenView();
 
   @override
   Widget build(BuildContext context) {
@@ -92,7 +104,7 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _navigateToProfile(context),
+        onPressed: () => context.read<HomeBloc>().add(HomeProfileSelected()),
         tooltip: 'Perfil',
         backgroundColor: Colors.orangeAccent, // O el color que prefieras
         child: const Icon(Icons.person, color: Colors.black),
@@ -110,7 +122,7 @@ class HomeScreen extends StatelessWidget {
     IconData? icon,
   }) {
     return GestureDetector(
-      onTap: () => _navigate(context, route),
+      onTap: () => context.read<HomeBloc>().add(HomeRouteSelected(route)),
       child: Column(
         children: [
           Expanded(

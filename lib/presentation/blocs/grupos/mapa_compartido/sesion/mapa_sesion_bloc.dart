@@ -29,6 +29,7 @@ class MapaSesionBloc extends Bloc<MapaSesionEvent, MapaSesionState> {
     on<MapaSesionEnviarSOS>(_onEnviarSOS);
     on<MapaSesionFinalizar>(_onFinalizar);
     on<MapaSesionSalir>(_onSalir);
+    on<MapaSesionRutaCompartidaActualizada>(_onRutaCompartidaActualizada);
   }
 
   Future<void> _onInicializar(
@@ -96,6 +97,8 @@ class MapaSesionBloc extends Bloc<MapaSesionEvent, MapaSesionState> {
     }
   }
 
+  StreamSubscription? _rutaCompartidaSubscription;
+
   void _iniciarStreams() {
     _participantesSubscription?.cancel();
     _participantesSubscription = _grupoRepository
@@ -109,6 +112,13 @@ class MapaSesionBloc extends Bloc<MapaSesionEvent, MapaSesionState> {
         .streamEstadoSesion(_sesionId)
         .listen((sesion) {
       add(MapaSesionEstadoActualizado(sesion));
+    });
+
+    _rutaCompartidaSubscription?.cancel();
+    _rutaCompartidaSubscription = _grupoRepository
+        .streamRutaCompartida(_sesionId)
+        .listen((ruta) {
+      add(MapaSesionRutaCompartidaActualizada(ruta));
     });
   }
 
@@ -191,6 +201,13 @@ class MapaSesionBloc extends Bloc<MapaSesionEvent, MapaSesionState> {
     }
   }
 
+  void _onRutaCompartidaActualizada(
+    MapaSesionRutaCompartidaActualizada event,
+    Emitter<MapaSesionState> emit,
+  ) {
+    emit(state.copyWith(rutaCompartida: event.rutaCompartida));
+  }
+
   Future<void> _onSalir(
     MapaSesionSalir event,
     Emitter<MapaSesionState> emit,
@@ -207,6 +224,7 @@ class MapaSesionBloc extends Bloc<MapaSesionEvent, MapaSesionState> {
   Future<void> close() {
     _participantesSubscription?.cancel();
     _estadoSesionSubscription?.cancel();
+    _rutaCompartidaSubscription?.cancel();
     return super.close();
   }
 }

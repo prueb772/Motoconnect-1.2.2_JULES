@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../data/models/event_model.dart';
 import '../../../data/models/grupo_ruta_model.dart';
+import '../../../data/models/routes/map_picker_args.dart';
 import '../../../data/repositories/event_repository.dart';
 import '../../../data/repositories/grupo_repository.dart';
 import '../../blocs/events/create_event/create_event_bloc.dart';
@@ -228,20 +229,19 @@ class _CreateEventViewState extends State<_CreateEventView> {
   }
 
   Future<void> _seleccionarUbicacion(bool esPuntoEncuentro) async {
-    final resultado = await Navigator.push<MapPickerResult>(
+    final resultado = await Navigator.pushNamed(
       context,
-      MaterialPageRoute(
-        builder: (context) => MapPickerScreen(
-          initialPosition: esPuntoEncuentro
-              ? (_puntoEncuentroLat != null
-                  ? LatLng(_puntoEncuentroLat!, _puntoEncuentroLng!)
-                  : null)
-              : (_destinoLat != null
-                  ? LatLng(_destinoLat!, _destinoLng!)
-                  : null),
-        ),
+      '/map-picker',
+      arguments: MapPickerArgs(
+        initialPosition: esPuntoEncuentro
+            ? (_puntoEncuentroLat != null
+                ? LatLng(_puntoEncuentroLat!, _puntoEncuentroLng!)
+                : null)
+            : (_destinoLat != null
+                ? LatLng(_destinoLat!, _destinoLng!)
+                : null),
       ),
-    );
+    ) as MapPickerResult?;
 
     if (resultado != null && mounted) {
       setState(() {

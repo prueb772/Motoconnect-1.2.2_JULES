@@ -68,7 +68,7 @@ class MapaSesionState extends Equatable {
   }
 
   @override
-  List<Object?> get props => [
+  List<Object> get props => [
         status,
         message,
         progress,
@@ -79,6 +79,6 @@ class MapaSesionState extends Equatable {
         estaAprobado,
         trackingPausadoPorUsuario,
         miUsuarioId,
-        rutaCompartida,
+        if (rutaCompartida != null) rutaCompartida!,
       ];
 }

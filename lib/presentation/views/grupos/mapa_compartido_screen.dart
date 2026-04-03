@@ -6,18 +6,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../data/models/sesion_ruta_activa_model.dart';
-import '../../../data/models/ruta_compartida_model.dart';
 import '../../../data/models/grupo_ruta_model.dart';
 import '../../../data/models/ubicacion_tiempo_real_model.dart';
 import '../../../data/models/navigation_progress.dart';
 import '../../../data/models/participante_sesion_model.dart';
 import '../../../data/models/navigation_step.dart';
+import '../../../data/models/ruta_compartida_model.dart';
 import '../../../data/repositories/grupo_repository.dart';
 import '../../../data/repositories/navigation_repository.dart';
-import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_bloc.dart';
-import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_state.dart';
-import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_event.dart';
 import '../../blocs/auth/auth/auth_bloc.dart';
+import '../../blocs/grupos/mapa_compartido/tracking/mapa_tracking_bloc.dart';
+import '../../blocs/grupos/mapa_compartido/tracking/mapa_tracking_event.dart';
+import '../../blocs/grupos/mapa_compartido/tracking/mapa_tracking_state.dart';
 import '../../../data/services/navigation/google_directions_service.dart';
 import '../../../data/services/navigation/navigation_tracking_service.dart';
 import '../../../services/location_tracking_service.dart';
@@ -29,6 +29,18 @@ import '../../widgets/location_search_field.dart';
 import '../navigation/navigation_screen.dart';
 import '../../../services/notification_service.dart';
 import 'package:geolocator/geolocator.dart';
+
+class IniciarRutaArgs {
+  final double lat;
+  final double lng;
+  final String? nombre;
+
+  IniciarRutaArgs({
+    required this.lat,
+    required this.lng,
+    this.nombre,
+  });
+}
 
 /// Estados de conexión local por participante (solo para UI, no persiste en BD).
 ///
@@ -82,7 +94,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   // Map de participantes para lookup O(1) eficiente
   Map<String, ParticipanteSesionModel> _participantesMap = {};
 
-  StreamSubscription? _ubicacionesSubscription;
   StreamSubscription? _navigationProgressSubscription;
   StreamSubscription? _participantesSubscription;
   StreamSubscription? _rutaCompartidaSubscription;
@@ -92,6 +103,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   String? _miUsuarioId;
 
   // Ruta compartida
+  RutaCompartidaModel? _rutaCompartida;
   Polyline? _polylineCompartida;
   List<NavigationStep>? _navigationSteps; // Steps de navegación por voz
   int? _currentStepIndex; // Índice del paso actual
@@ -142,18 +154,12 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   // Panel de participantes embebido (visible/oculto)
   bool _panelParticipantesVisible = false;
 
-  // Staleness: última actualización de ubicación por usuario (para detectar
-  // conexión perdida cuando el dispositivo no puede escribir en la BD)
-  final Map<String, DateTime> _ultimaUbicacionPorUsuario = {};
   Timer? _timerRefreshPanel;
+
 
   // Ajuste manual del destino compartido (drag del marcador, solo local)
   LatLng? _destinoAjustado;
 
-  // Estado de conexión
-  bool _conexionPerdida = false;
-  bool _mostrarMensajeRestablecida = false;
-  Timer? _timerMensajeRestablecida;
   String _initializingMessage = 'Inicializando sesión...';
   double _initializingProgress = 0.0;
 
@@ -168,8 +174,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   // Cache para resolver race conditions
   List<ParticipanteSesionModel> _participantesCache = [];
   bool _participantesReady = false;
-  List<UbicacionTiempoRealModel> _ubicacionesCache = [];
-  bool _ubicacionesReady = false;
 
   @override
   void initState() {
@@ -213,13 +217,11 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _ubicacionesSubscription?.cancel();
     _navigationProgressSubscription?.cancel();
     _participantesSubscription?.cancel();
     _rutaCompartidaSubscription?.cancel();
     _estadoSesionSubscription?.cancel();
     _conectadoSubscription?.cancel();
-    _timerMensajeRestablecida?.cancel();
     _timerRefreshPanel?.cancel();
     _navigationLocationSubscription?.cancel();
     _miPosicionSubscription?.cancel();
@@ -306,8 +308,8 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
         });
       }
       _suscribirseAParticipantes();
-      _suscribirseAUbicaciones();
       _suscribirseAProgresoNavegacion();
+      _suscribirseARutaCompartida();
       _suscribirseAEstadoSesion();
 
       // 5. Timer para limpieza periódica de cache y diagnóstico
@@ -420,82 +422,69 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
         });
   }
 
-  void _suscribirseAUbicaciones() {
-    _ubicacionesSubscription = _grupoRepository
-        .suscribirseAUbicaciones(widget.sesion.id)
-        .listen((ubicaciones) async {
-          // Registrar timestamp de última ubicación por usuario para staleness
-          for (final u in ubicaciones) {
-            _ultimaUbicacionPorUsuario[u.usuarioId] = u.ultimaActualizacion;
-          }
 
-          // Cachear ubicaciones
-          _ubicacionesCache = ubicaciones;
-          _ubicacionesReady = true;
-
-          // Solo actualizar si participantes están listos
-          // Esto evita la race condition donde ubicaciones llegan primero
-          if (_participantesReady) {
-            try {
-              await _actualizarMarcadores(ubicaciones);
-            } catch (e) {
-              debugPrint('❌ Error al actualizar marcadores: $e');
-            }
-          } else {
-            debugPrint(
-              '⏳ Ubicaciones recibidas pero participantes no listos, esperando...',
-            );
-          }
-        });
-  }
-
-  void _manejarCambioRutaCompartida(RutaCompartidaModel? ruta) async {
-    if (context.read<MapaSesionBloc>().state.rutaCompartida?.id == ruta?.id && context.read<MapaSesionBloc>().state.rutaCompartida != null) return;
-
+  void _suscribirseARutaCompartida() {
     debugPrint(
-      '📡 Bloc emitió cambio de ruta compartida: ${ruta != null ? "nueva ruta" : "null (cancelada)"}',
+      '📡 Suscribiendo a stream de ruta compartida para sesión: ${widget.sesion.id}',
     );
 
-    if (ruta != null) {
-      debugPrint(
-        '   📍 Destino: ${ruta.destinoNombre ?? 'Sin nombre'}',
-      );
-      debugPrint(
-        '   📍 Lat: ${ruta.destinoLat}, Lng: ${ruta.destinoLng}',
-      );
-    }
+    _rutaCompartidaSubscription = _grupoRepository
+        .streamRutaCompartida(widget.sesion.id)
+        .listen(
+          (ruta) async {
+            debugPrint(
+              '📡 Stream de ruta compartida emitió: ${ruta != null ? "nueva ruta" : "null (cancelada)"}',
+            );
 
-    setState(() {
-      _destinoAjustado =
-          null; // Resetear ajuste local cuando el líder cambia el destino
-    });
+            if (ruta != null) {
+              debugPrint(
+                '   📍 Destino: ${ruta.destinoNombre ?? 'Sin nombre'}',
+              );
+              debugPrint(
+                '   📍 Lat: ${ruta.destinoLat}, Lng: ${ruta.destinoLng}',
+              );
+            }
 
-    // Si hay ruta compartida, calcular polyline desde mi ubicación (con retry)
-    if (ruta != null && _estaAprobado) {
-      debugPrint('🗺️ Calculando polyline hacia destino con retry...');
-      await _calcularPolylineHaciaDestinoConRetry(
-        ruta.destinoLat,
-        ruta.destinoLng,
-      );
-    } else {
-      // Limpiar ruta cuando se cancela
-      debugPrint('🧹 Limpiando polyline (ruta es null)');
+            setState(() {
+              _rutaCompartida = ruta;
+              _destinoAjustado =
+                  null; // Resetear ajuste local cuando el líder cambia el destino
+            });
 
-      // Detener navegación por voz si estaba activa
-      if (_navigationSteps != null) {
-        _detenerNavegacionPorVoz();
-      }
+            // Si hay ruta compartida, calcular polyline desde mi ubicación (con retry)
+            if (ruta != null && _estaAprobado) {
+              debugPrint('🗺️ Calculando polyline hacia destino con retry...');
+              await _calcularPolylineHaciaDestinoConRetry(
+                ruta.destinoLat,
+                ruta.destinoLng,
+              );
+            } else {
+              // Limpiar ruta cuando se cancela
+              debugPrint('🧹 Limpiando polyline (stream emitió null)');
 
-      if (mounted) {
-        setState(() {
-          _polylineCompartida = null;
-          if (_markers.containsKey('destino_compartido')) {
-            _markers.remove('destino_compartido');
-            debugPrint('✅ Marcador de destino removido');
-          }
-        });
-      }
-    }
+              // Detener navegación por voz si estaba activa
+              if (_navigationSteps != null) {
+                _detenerNavegacionPorVoz();
+              }
+
+              if (mounted) {
+                setState(() {
+                  _polylineCompartida = null;
+                  if (_markers.containsKey('destino_compartido')) {
+                    _markers.remove('destino_compartido');
+                    debugPrint('✅ Marcador de destino removido');
+                  }
+                });
+              }
+            }
+          },
+          onError: (error) {
+            debugPrint('❌ Error en stream de ruta compartida: $error');
+          },
+          onDone: () {
+            debugPrint('✅ Stream de ruta compartida completado');
+          },
+        );
   }
 
   void _suscribirseAEstadoSesion() {
@@ -743,13 +732,13 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
               }
             }
 
-            // Si hay ubicaciones en cache esperando, actualizarlas ahora
-            // Esto maneja el caso donde ubicaciones llegaron mientras participantes cargaban
-            if (_ubicacionesCache.isNotEmpty && _ubicacionesReady) {
+            // Actualizar marcadores con el último estado del BLoC
+            final trackingState = context.read<MapaTrackingBloc>().state;
+            if (trackingState.ubicaciones.isNotEmpty) {
               debugPrint(
                 '🔄 Actualizando marcadores con ubicaciones en cache...',
               );
-              await _actualizarMarcadores(_ubicacionesCache);
+              await _actualizarMarcadores(trackingState.ubicaciones);
             }
           },
           onError: (error) {
@@ -858,11 +847,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
             }
 
             if (mounted) {
-              setState(() {
-                _conexionPerdida = true;
-                _mostrarMensajeRestablecida = false;
-              });
-              _timerMensajeRestablecida?.cancel();
+                context.read<MapaTrackingBloc>().add(const MapaTrackingConexionActualizada(false));
             }
           } else {
             // Conexión restaurada → reactivar solo si no fue pausa manual
@@ -878,19 +863,12 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
               }
 
               if (mounted) {
-                setState(() {
-                  _conexionPerdida = false;
-                  _mostrarMensajeRestablecida = true;
+                context.read<MapaTrackingBloc>().add(const MapaTrackingConexionActualizada(true));
+                Future.delayed(const Duration(seconds: 4), () {
+                  if (mounted) {
+                    context.read<MapaTrackingBloc>().add(MapaTrackingDismissMensajeConexion());
+                  }
                 });
-                _timerMensajeRestablecida?.cancel();
-                _timerMensajeRestablecida = Timer(
-                  const Duration(seconds: 4),
-                  () {
-                    if (mounted) {
-                      setState(() => _mostrarMensajeRestablecida = false);
-                    }
-                  },
-                );
               }
             }
           }
@@ -954,6 +932,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
 
       final estaPausado = !participante.trackingActivo;
       final estaDesconectado = participante.conexionPerdida;
+      final trackingState = context.read<MapaTrackingBloc>().state;
 
       // Obtener o crear marcador con retry automático
       // Tanto pausado como sin conexión usan el estilo grisado
@@ -1120,14 +1099,14 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
           // Botón de solicitudes pendientes (solo líder)
           if (_esLider) _buildBotonSolicitudes(),
           // Botón de iniciar ruta (solo líder, solo si no hay ruta activa)
-          if (_esLider && context.read<MapaSesionBloc>().state.rutaCompartida == null)
+          if (_esLider && _rutaCompartida == null)
             TextButton.icon(
               onPressed: _mostrarIniciarRuta,
               icon: const Icon(Icons.route, size: 18),
               label: const Text('Iniciar ruta'),
             ),
           // Botón de cancelar ruta (solo líder, solo si hay ruta activa)
-          if (_esLider && context.read<MapaSesionBloc>().state.rutaCompartida != null)
+          if (_esLider && _rutaCompartida != null)
             TextButton.icon(
               onPressed: _confirmarCancelarRuta,
               style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -1160,9 +1139,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
               }
             },
           ),
-          // Banner de estado de conexión
-          if (_conexionPerdida || _mostrarMensajeRestablecida)
-            _buildBannerConexion(),
           // Tarjeta de instrucciones de navegación
           _buildTarjetaNavegacion(),
           // Panel inferior de progreso (tiempo/distancia restantes)
@@ -1170,6 +1146,14 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
           // Panel de participantes embebido (se reconstruye con setState)
           _buildPanelParticipantesOverlay(),
           // Overlay de carga durante inicialización
+        BlocBuilder<MapaTrackingBloc, MapaTrackingState>(
+          builder: (context, trackingState) {
+            if (trackingState.conexionPerdida || trackingState.mostrarMensajeRestablecida) {
+              return _buildBannerConexion(trackingState.conexionPerdida);
+            }
+            return const SizedBox.shrink();
+          },
+        ),
           if (_isInitializing)
             Container(
               color: Colors.black.withValues(alpha: 0.5),
@@ -1823,11 +1807,12 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   ///   60–180 s → sinActualizacion  (retraso normal en ciudad/túnel)
   ///   > 180 s  → sinConexion
   _EstadoConexion _estadoConexionLocal(ParticipanteSesionModel p) {
+    final trackingState = context.read<MapaTrackingBloc>().state;
     if (!p.trackingActivo) return _EstadoConexion.pausado;
     if (p.conexionPerdida) return _EstadoConexion.sinConexion;
-    if (_conexionPerdida) return _EstadoConexion.activo;
+    if (trackingState.conexionPerdida) return _EstadoConexion.activo;
 
-    final ultima = _ultimaUbicacionPorUsuario[p.usuarioId];
+    final ultima = trackingState.ultimaUbicacionPorUsuario[p.usuarioId];
     if (ultima == null)
       return _EstadoConexion.activo; // nunca recibida → no asumir problema
 
@@ -1928,8 +1913,8 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   }
 
   void _irAParticipante(ParticipanteSesionModel participante) {
-    final ubicacion =
-        _ubicacionesCache
+    final trackingState = context.read<MapaTrackingBloc>().state;
+    final ubicacion = trackingState.ubicaciones
             .where((u) => u.usuarioId == participante.usuarioId)
             .firstOrNull;
 
@@ -2164,9 +2149,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   // BANNER DE ESTADO DE CONEXIÓN
   // ========================================
 
-  Widget _buildBannerConexion() {
-    final bool perdida = _conexionPerdida;
-
+  Widget _buildBannerConexion(bool perdida) {
     return Positioned(
       top: 0,
       left: 0,
@@ -2195,8 +2178,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
               if (!perdida)
                 GestureDetector(
                   onTap: () {
-                    _timerMensajeRestablecida?.cancel();
-                    setState(() => _mostrarMensajeRestablecida = false);
+                    context.read<MapaTrackingBloc>().add(MapaTrackingDismissMensajeConexion());
                   },
                   child: const Icon(Icons.close, color: Colors.white, size: 18),
                 ),
@@ -2640,7 +2622,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
             BitmapDescriptor.hueAzure,
           ),
           infoWindow: InfoWindow(
-            title: context.read<MapaSesionBloc>().state.rutaCompartida?.destinoNombre ?? 'Destino',
+            title: _rutaCompartida?.destinoNombre ?? 'Destino',
             snippet: 'Toca para navegar',
           ),
           onTap: _iniciarNavegacionHaciaDestino,
@@ -2756,7 +2738,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
       return;
     }
 
-    final resultado = await showDialog<Map<String, dynamic>>(
+    final resultado = await showDialog<IniciarRutaArgs>(
       context: context,
       builder: (context) => const _IniciarRutaDialog(),
     );
@@ -2765,16 +2747,16 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
       try {
         await _grupoRepository.compartirRuta(
           sesionId: widget.sesion.id,
-          destinoLat: resultado['lat'] as double,
-          destinoLng: resultado['lng'] as double,
-          destinoNombre: resultado['nombre'] as String?,
+          destinoLat: resultado.lat,
+          destinoLng: resultado.lng,
+          destinoNombre: resultado.nombre,
         );
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Ruta compartida: ${resultado['nombre'] ?? 'Destino'}',
+                'Ruta compartida: ${resultado.nombre ?? 'Destino'}',
               ),
               backgroundColor: Colors.green,
             ),
@@ -2934,8 +2916,8 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
 
       // PASO 1: Limpiar UI INMEDIATAMENTE (no esperar stream)
       if (mounted) {
-        context.read<MapaSesionBloc>().add(MapaSesionRutaCompartidaActualizada(null));
         setState(() {
+          _rutaCompartida = null;
           _polylineCompartida = null;
           _markers.remove('destino_compartido');
         });
@@ -3107,14 +3089,14 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
       if (offRoute) {
         _offRouteSince ??= DateTime.now();
         final offSeconds = DateTime.now().difference(_offRouteSince!).inSeconds;
-        if (offSeconds >= _offRouteTriggerSeconds && context.read<MapaSesionBloc>().state.rutaCompartida != null) {
+        if (offSeconds >= _offRouteTriggerSeconds && _rutaCompartida != null) {
           _offRouteSince = null;
           _isRecalculating = true;
           _voiceProximity200Fired = false;
           _voiceProximity50Fired = false;
           _voiceService.announceRecalculating();
-          final lat = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLat;
-          final lng = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLng;
+          final lat = _rutaCompartida!.destinoLat;
+          final lng = _rutaCompartida!.destinoLng;
           _calcularPolylineHaciaDestinoConRetry(lat, lng);
           return;
         }
@@ -3146,9 +3128,9 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
     //   Nivel 1: < 50 m (GPS preciso, cualquier velocidad)
     //   Nivel 2: < 80 m + velocidad < 20 km/h (edificios, estacionamientos)
     final isLastStep = _currentStepIndex! == _navigationSteps!.length - 1;
-    if (isLastStep && context.read<MapaSesionBloc>().state.rutaCompartida != null) {
-      final destLat = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLat;
-      final destLng = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLng;
+    if (isLastStep && _rutaCompartida != null) {
+      final destLat = _rutaCompartida!.destinoLat;
+      final destLng = _rutaCompartida!.destinoLng;
       final distToDestination = Geolocator.distanceBetween(
         navLocation.latitude,
         navLocation.longitude,
@@ -3461,16 +3443,16 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   ///
   /// Pasa el sesionGrupalId para que el progreso se comparta con el grupo.
   void _iniciarNavegacionHaciaDestino() {
-    if (context.read<MapaSesionBloc>().state.rutaCompartida == null) return;
+    if (_rutaCompartida == null) return;
 
     // Si el usuario arrastró el marcador, usar su posición ajustada
     final destino =
         _destinoAjustado ??
         LatLng(
-          context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLat,
-          context.read<MapaSesionBloc>().state.rutaCompartida!.destinoLng,
+        _rutaCompartida!.destinoLat,
+        _rutaCompartida!.destinoLng,
         );
-    final nombre = context.read<MapaSesionBloc>().state.rutaCompartida!.destinoNombre;
+    final nombre = _rutaCompartida!.destinoNombre;
 
     Navigator.push(
       context,
@@ -3713,11 +3695,11 @@ class _IniciarRutaDialogState extends State<_IniciarRutaDialog> {
   void _confirmar() {
     if (_destinoSeleccionado == null) return;
 
-    Navigator.pop(context, {
-      'lat': _destinoSeleccionado!.latitude,
-      'lng': _destinoSeleccionado!.longitude,
-      'nombre': _nombreDestino,
-    });
+    Navigator.pop(context, IniciarRutaArgs(
+      lat: _destinoSeleccionado!.latitude,
+      lng: _destinoSeleccionado!.longitude,
+      nombre: _nombreDestino,
+    ));
   }
 }
 

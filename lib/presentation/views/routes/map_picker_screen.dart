@@ -6,30 +6,27 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:google_place/google_place.dart';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../blocs/routes/map_picker/map_picker_bloc.dart';
 import '../../blocs/routes/map_picker/map_picker_event.dart';
 import '../../blocs/routes/map_picker/map_picker_state.dart';
+import '../../../data/models/routes/map_picker_args.dart';
 
 class MapPickerScreen extends StatelessWidget {
-  final LatLng? initialPosition;
-  final String? initialSearchQuery;
-
-  const MapPickerScreen({
-    super.key,
-    this.initialPosition,
-    this.initialSearchQuery,
-  });
+  const MapPickerScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final args = ModalRoute.of(context)!.settings.arguments as MapPickerArgs?;
+
     return BlocProvider(
       create: (context) => MapPickerBloc(
-        mapPickerService: MapPickerService(), // Can be injected through locator if available, but manual instantiation matching old behavior
+        mapPickerService: MapPickerService(),
       ),
       child: _MapPickerScreenView(
-        initialPosition: initialPosition,
-        initialSearchQuery: initialSearchQuery,
+        initialPosition: args?.initialPosition,
+        initialSearchQuery: args?.initialSearchQuery,
       ),
     );
   }

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -10,9 +9,9 @@ import '../../../../../data/models/navigation_progress.dart';
 import '../../../../../data/repositories/grupo_repository.dart';
 import '../../../../../data/repositories/navigation_repository.dart';
 import '../../../../../services/location_tracking_service.dart';
-import '../../../../../services/google_directions_service.dart';
+import '../../../../../data/services/navigation/google_directions_service.dart';
 import '../../../../../services/navigation_voice_service.dart';
-import '../../../../../services/navigation_tracking_service.dart';
+import '../../../../../data/services/navigation/navigation_tracking_service.dart';
 
 import 'mapa_navigation_event.dart';
 import 'mapa_navigation_state.dart';
@@ -71,19 +70,18 @@ class MapaNavigationBloc extends Bloc<MapaNavigationEvent, MapaNavigationState> 
     _rutaCompartidaSubscription = _grupoRepository
         .streamRutaCompartida(_sesionId)
         .listen((ruta) {
-      // NOTE: NavigationBloc was explicitly directed to KEEP RutaSesionModel
-      // per Phase instructions, but since streamRutaCompartida signature changed
-      // to return RutaCompartidaModel in GrupoRepository, we map it back here
-      // without affecting the model itself or the rest of the navigation bloc.
-      final rutaSesion = ruta != null ? RutaSesionModel(
-        id: ruta.id,
-        sesionId: ruta.sesionId,
-        destinoLat: ruta.destinoLat,
-        destinoLng: ruta.destinoLng,
-        destinoNombre: ruta.destinoNombre,
-        compartidaPor: ruta.compartidaPor ?? '',
-        createdAt: ruta.createdAt ?? DateTime.now(),
-      ) : null;
+      RutaSesionModel? rutaSesion;
+      if (ruta != null) {
+        rutaSesion = RutaSesionModel(
+          id: ruta.id,
+          sesionId: ruta.sesionId,
+          destinoLat: ruta.destinoLat,
+          destinoLng: ruta.destinoLng,
+          destinoNombre: ruta.destinoNombre,
+          compartidaPor: ruta.compartidaPor ?? '',
+          createdAt: ruta.createdAt ?? DateTime.now(),
+        );
+      }
       add(MapaNavigationRutaActualizada(rutaSesion));
     });
 

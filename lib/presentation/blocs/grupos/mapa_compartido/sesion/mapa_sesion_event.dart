@@ -1,8 +1,8 @@
 import 'package:equatable/equatable.dart';
 import '../../../../../data/models/participante_sesion_model.dart';
 import '../../../../../data/models/sesion_ruta_activa_model.dart';
-import '../../../../../data/models/ruta_compartida_model.dart';
 import '../../../../../data/models/grupo_ruta_model.dart';
+import '../../../../../data/models/ruta_compartida_model.dart';
 
 abstract class MapaSesionEvent extends Equatable {
   const MapaSesionEvent();
@@ -50,7 +50,11 @@ class MapaSesionFinalizar extends MapaSesionEvent {}
 
 class MapaSesionSalir extends MapaSesionEvent {}
 
-final class MapaSesionRutaCompartidaActualizada extends MapaSesionEvent {
+class MapaSesionRutaCompartidaActualizada extends MapaSesionEvent {
   final RutaCompartidaModel? rutaCompartida;
+
   const MapaSesionRutaCompartidaActualizada(this.rutaCompartida);
+
+  @override
+  List<Object?> get props => [rutaCompartida];
 }
