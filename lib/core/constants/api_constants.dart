@@ -106,9 +106,6 @@ class ApiConstants {
   /// Tipo: evento compartido
   static const String postTypeSharedEvent = 'evento_compartido';
 
-  /// Tipo: taller compartido
-  static const String postTypeSharedTaller = 'taller_compartido';
-
   // ========================================
   // DEEP LINKS
   // ========================================
