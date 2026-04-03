@@ -70,10 +70,22 @@ class MapaSesionBloc extends Bloc<MapaSesionEvent, MapaSesionState> {
       ));
 
       if (!estaAprobado && !esLider && !esAdminGrupo) {
+        // El usuario no está aprobado, solicitar unirse a la sesión
+        await _grupoRepository.solicitarUnirseASesion(sesionId: _sesionId);
+
         emit(state.copyWith(
-          status: MapaSesionStatus.permissionsError,
-          message: 'No tienes permisos para ver esta sesión.',
+          status: MapaSesionStatus.esperandoAprobacion,
+          message: 'Esperando aprobación del líder...',
         ));
+
+        // Iniciar stream de participantes para escuchar cuando sea aprobado
+        _participantesSubscription?.cancel();
+        _participantesSubscription = _grupoRepository
+            .streamParticipantes(_sesionId)
+            .listen((participantes) {
+          add(MapaSesionParticipantesActualizados(participantes));
+        });
+
         return;
       }
       
@@ -126,20 +138,44 @@ class MapaSesionBloc extends Bloc<MapaSesionEvent, MapaSesionState> {
     MapaSesionParticipantesActualizados event,
     Emitter<MapaSesionState> emit,
   ) {
-    if (state.status != MapaSesionStatus.ready && state.status != MapaSesionStatus.loading) return;
+    if (state.status != MapaSesionStatus.ready &&
+        state.status != MapaSesionStatus.loading &&
+        state.status != MapaSesionStatus.esperandoAprobacion) return;
     
     final map = {for (final p in event.participantes) p.usuarioId: p};
     
-    // Check if the current user was unapproved/rejected while observing
+    // Check if the current user was unapproved/rejected while observing or waiting
     if (!state.esLider && !state.esAdminGrupo) {
       final miParticipante = map[state.miUsuarioId];
-      if (miParticipante != null && !miParticipante.estaAprobado) {
-        emit(state.copyWith(
-          status: MapaSesionStatus.permissionsError,
-          message: 'Tu participación fue revocada.',
-          estaAprobado: false,
-        ));
-        return;
+
+      if (miParticipante != null) {
+        if (state.status == MapaSesionStatus.esperandoAprobacion && miParticipante.estaAprobado) {
+          // El usuario acaba de ser aprobado
+          emit(state.copyWith(
+            status: MapaSesionStatus.ready,
+            estaAprobado: true,
+            participantes: event.participantes,
+            participantesMap: map,
+          ));
+          _iniciarStreams(); // Reiniciar streams completos ahora que está aprobado
+          return;
+        } else if (state.status == MapaSesionStatus.ready && !miParticipante.estaAprobado) {
+          // El usuario estaba aprobado y se le revocó el acceso
+          emit(state.copyWith(
+            status: MapaSesionStatus.permissionsError,
+            message: 'Tu participación fue revocada.',
+            estaAprobado: false,
+          ));
+          return;
+        }
+      } else if (state.status == MapaSesionStatus.ready) {
+         // El participante fue eliminado de la lista (salió o fue expulsado)
+         emit(state.copyWith(
+            status: MapaSesionStatus.permissionsError,
+            message: 'Ya no eres parte de la sesión.',
+            estaAprobado: false,
+          ));
+          return;
       }
     }
     

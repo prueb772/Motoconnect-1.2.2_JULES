@@ -6,6 +6,7 @@ enum MapaSesionStatus {
   initial,
   loading,
   permissionsError,
+  esperandoAprobacion,
   ready,
   error,
   finalizada,

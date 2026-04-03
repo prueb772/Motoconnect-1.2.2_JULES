@@ -107,7 +107,7 @@ class TallerRepositoryImpl implements TallerRepository {
     await _supabase.from('comentarios_comunidad').insert({
       'usuario_id': userId,
       'contenido': contenido,
-      'tipo': 'taller_compartido',
+      'tipo': 'texto',
       'referencia_taller_id': taller.id,
       'fecha': DateTime.now().toIso8601String(),
     });

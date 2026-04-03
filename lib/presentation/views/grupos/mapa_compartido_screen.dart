@@ -18,6 +18,8 @@ import '../../blocs/auth/auth/auth_bloc.dart';
 import '../../blocs/grupos/mapa_compartido/tracking/mapa_tracking_bloc.dart';
 import '../../blocs/grupos/mapa_compartido/tracking/mapa_tracking_event.dart';
 import '../../blocs/grupos/mapa_compartido/tracking/mapa_tracking_state.dart';
+import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_bloc.dart';
+import '../../blocs/grupos/mapa_compartido/sesion/mapa_sesion_state.dart';
 import '../../../data/services/navigation/google_directions_service.dart';
 import '../../../data/services/navigation/navigation_tracking_service.dart';
 import '../../../services/location_tracking_service.dart';
@@ -1084,7 +1086,23 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return BlocListener<MapaSesionBloc, MapaSesionState>(
+      listener: (context, state) {
+        if (state.status == MapaSesionStatus.ready) {
+          if (mounted && (_estaAprobado != state.estaAprobado || _esLider != state.esLider)) {
+            setState(() {
+              _estaAprobado = state.estaAprobado;
+              _esLider = state.esLider;
+            });
+            if (_estaAprobado) {
+              _iniciarTracking().catchError((e) {
+                debugPrint('Error al iniciar tracking por listener: $e');
+              });
+            }
+          }
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1196,9 +1214,17 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
               ),
             ),
           // Overlay de espera de aprobación (solo para participantes NO aprobados)
-          if (!_estaAprobado && !_esLider && !_isInitializing)
-            _buildPantallaEspera(),
+          BlocBuilder<MapaSesionBloc, MapaSesionState>(
+            builder: (context, state) {
+              if (state.status == MapaSesionStatus.esperandoAprobacion ||
+                  (!state.estaAprobado && !state.esLider && !_isInitializing)) {
+                return _buildPantallaEspera(state);
+              }
+              return const SizedBox.shrink();
+            },
+          ),
         ],
+      ),
       ),
     );
   }
@@ -1479,10 +1505,10 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
     );
   }
 
-  Widget _buildPantallaEspera() {
+  Widget _buildPantallaEspera(MapaSesionState state) {
     // Obtener todos los participantes pendientes (incluyendo el usuario actual)
     final participantesPendientes =
-        _participantes.where((p) => p.estaPendiente).toList();
+        state.participantes.isNotEmpty ? state.participantes.where((p) => p.estaPendiente).toList() : _participantes.where((p) => p.estaPendiente).toList();
 
     return Container(
       color: Colors.white,
