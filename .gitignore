@@ -1,0 +1,94 @@
+# ==============================
+# 🔧 FLUTTER / DART
+# ==============================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+.packages
+.pub/
+.pub-cache/
+build/
+
+# Symbolication / Obfuscation
+app.*.symbols
+app.*.map.json
+
+# ==============================
+# 🧠 IDE / EDITORES
+# ==============================
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+.atom/
+.history
+.swiftpm/
+
+# ==============================
+# 🤖 CLAUDE / CONFIG LOCAL
+# ==============================
+.claude/
+
+# ==============================
+# 📦 ANDROID
+# ==============================
+android/.gradle/
+android/.kotlin/
+android/local.properties
+
+# Build outputs de Android Studio
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Generados por Flutter (NO subir)
+android/app/src/main/java/io/flutter/plugins/
+
+# ==============================
+# 🧪 LOGS Y TEMPORALES
+# ==============================
+*.log
+*.tmp
+*.cache
+*.class
+*.pyc
+*.swp
+
+DebugConsole.txt
+analyze_output.txt
+analyze_result.txt
+
+# ==============================
+# 📂 ARCHIVOS PERSONALES / INTERNOS
+# ==============================
+Imagenespruebas/
+Planes/
+MANUAL_USUARIO_MotoConnect_v1.2.1.md
+
+# 🔐 VARIABLES SENSIBLES
+# ==============================
+.env
+.env.*
+
+# ==============================
+# 🧰 DEVTOOLS
+# ==============================
+devtools_options.yaml
+
+# ==============================
+# 🍎 iOS / macOS (proyecto Android-only)
+# ==============================
+ios/
+macos/
+
+# ==============================
+# 📦 OTROS
+# ==============================
+.DS_Store
+.build/
+.buildlog/
+.svn/
+migrate_working_dir/
+Thumbs.db
