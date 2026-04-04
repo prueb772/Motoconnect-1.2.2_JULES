@@ -463,9 +463,10 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
           : _grupoRepository.estaAprobadoEnSesion(sesionId: widget.sesion.id),
     ]);
 
-    _esAdminGrupo = results[0];
-
-    setState(() {});
+    setState(() {
+      _esAdminGrupo = results[0];
+      _estaAprobado = results[1];
+    });
 
     // Si no está aprobado y no es líder, solicitar unirse
     if (!_estaAprobado && !_esLider) {
@@ -850,7 +851,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   Widget build(BuildContext context) {
     return BlocListener<MapaSesionBloc, MapaSesionState>(
       listener: (context, state) {
-        if (mounted && state.participantes.isNotEmpty && state.participantes != _participantesCache) {
+        if (mounted && state.participantes != _participantesCache) {
           setState(() {
             _participantes = state.participantes;
             _participantesCache = state.participantes;
