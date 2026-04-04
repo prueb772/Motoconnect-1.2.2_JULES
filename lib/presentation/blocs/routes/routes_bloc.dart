@@ -138,6 +138,7 @@ class RoutesBloc extends Bloc<RoutesEvent, RoutesState> {
       emit(state.copyWith(
         predictions: [],
         clearPredictions: true,
+        clearSelectedPlaceName: true,
       ));
       return;
     }
@@ -145,11 +146,15 @@ class RoutesBloc extends Bloc<RoutesEvent, RoutesState> {
     if (state.currentPosition == null) {
       emit(state.copyWith(
         errorMessage: 'Esperando ubicación del usuario',
+        clearSelectedPlaceName: true,
       ));
       return;
     }
 
-    emit(state.copyWith(status: RoutesStatus.searchingPlaces));
+    emit(state.copyWith(
+      status: RoutesStatus.searchingPlaces,
+      clearSelectedPlaceName: true,
+    ));
 
     try {
       var result = await _googlePlace.autocomplete.get(
@@ -166,12 +171,14 @@ class RoutesBloc extends Bloc<RoutesEvent, RoutesState> {
           status: RoutesStatus.locationLoaded,
           predictions: result.predictions!,
           clearError: true,
+          clearSelectedPlaceName: true,
         ));
       } else {
         emit(state.copyWith(
           status: RoutesStatus.locationLoaded,
           predictions: [],
           clearPredictions: true,
+          clearSelectedPlaceName: true,
         ));
       }
     } catch (e) {
@@ -179,6 +186,7 @@ class RoutesBloc extends Bloc<RoutesEvent, RoutesState> {
         errorMessage: 'Error en la búsqueda: ${e.toString()}',
         predictions: [],
         clearPredictions: true,
+        clearSelectedPlaceName: true,
       ));
       debugPrint('Error en RoutesBloc._onSearchQueryChanged: $e');
     }
