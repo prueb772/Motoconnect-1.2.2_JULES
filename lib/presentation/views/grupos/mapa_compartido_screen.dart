@@ -2645,6 +2645,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
         }
 
         setState(() {
+          _completePolylinePoints = polyline.points; // Asignar la nueva ruta para el cálculo del snapToPolyline
           _polylineCompartida = polyline;
           _markers['destino_compartido'] = destinoMarker;
           _navigationSteps = steps; // Guardar steps para navegación por voz
@@ -3022,6 +3023,24 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
     final speedKmh = (position.speed < 0 ? 0 : position.speed) * 3.6;
     final heading = position.heading < 0 ? 0.0 : position.heading;
 
+    // Inmediatamente actualizar el marcador con la posición GPS cruda, sin importar si estamos recalculando o no
+    if (mounted) {
+      setState(() {
+        _miPosicion = rawLocation;
+        _miHeading = heading;
+        _markers['mi_ubicacion'] = Marker(
+          markerId: const MarkerId('mi_ubicacion'),
+          position: rawLocation,
+          rotation: heading,
+          flat: true,
+          anchor: const Offset(0.5, 0.5),
+          icon: _arrowIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          zIndex: 10,
+          infoWindow: const InfoWindow(title: 'Tu ubicación'),
+        );
+      });
+    }
+
     // Snap local a la polyline cuando hay ruta activa — sin coste de API.
     final LatLng navLocation =
         (_navigationSteps != null && _completePolylinePoints.length >= 2)
@@ -3119,6 +3138,7 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
         _distanceToNextStepMeters = distanceToStepEnd;
         _remainingDistanceMeters = remaining;
         _remainingDurationSeconds = remainingDur;
+
         if (remainingPolyline.isNotEmpty) {
           _polylineCompartida = Polyline(
             polylineId: const PolylineId('ruta_compartida'),
