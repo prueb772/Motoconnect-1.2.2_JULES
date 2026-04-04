@@ -29,7 +29,6 @@ import '../../../core/constants/api_constants.dart';
 import '../../widgets/grupos/solicitudes_pendientes_dialog.dart';
 import '../../widgets/location_search_field.dart';
 import '../navigation/navigation_screen.dart';
-import '../../../services/notification_service.dart';
 import 'package:geolocator/geolocator.dart';
 
 class IniciarRutaArgs {
@@ -97,7 +96,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   Map<String, ParticipanteSesionModel> _participantesMap = {};
 
   StreamSubscription? _navigationProgressSubscription;
-  StreamSubscription? _participantesSubscription;
   StreamSubscription? _estadoSesionSubscription;
   StreamSubscription<bool>? _conectadoSubscription;
   bool _trackingActivo = false;
@@ -193,11 +191,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
     _miUsuarioId = authState is AuthAuthenticated ? authState.user.id : null;
     _esLider = widget.sesion.iniciadaPor == _miUsuarioId;
 
-    // Si es líder, está auto-aprobado
-    if (_esLider) {
-      _estaAprobado = true;
-    }
-
     _directionsService = GoogleDirectionsService(
       apiKey: ApiConstants.googleMapsApiKey,
     );
@@ -219,7 +212,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _navigationProgressSubscription?.cancel();
-    _participantesSubscription?.cancel();
     _estadoSesionSubscription?.cancel();
     _conectadoSubscription?.cancel();
     _timerRefreshPanel?.cancel();
@@ -270,15 +262,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
       }
       await _verificarPermisos();
 
-      // 2. CRÍTICO: Cargar participantes PRIMERO (40%)
-      if (mounted) {
-        setState(() {
-          _initializingMessage = 'Cargando participantes...';
-          _initializingProgress = 0.4;
-        });
-      }
-      await _cargarParticipantesInicial();
-
       // 3. Pre-generar marcadores con AWAIT (70%)
       // OPTIMIZACIÓN: Solo en modo release para evitar bloqueo del hilo principal
       if (!kDebugMode) {
@@ -307,7 +290,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
           _initializingProgress = 0.9;
         });
       }
-      _suscribirseAParticipantes();
       _suscribirseAProgresoNavegacion();
       _suscribirseAEstadoSesion();
 
@@ -481,10 +463,10 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
           : _grupoRepository.estaAprobadoEnSesion(sesionId: widget.sesion.id),
     ]);
 
-    _esAdminGrupo = results[0];
-    _estaAprobado = results[1];
-
-    setState(() {});
+    setState(() {
+      _esAdminGrupo = results[0];
+      _estaAprobado = results[1];
+    });
 
     // Si no está aprobado y no es líder, solicitar unirse
     if (!_estaAprobado && !_esLider) {
@@ -496,6 +478,10 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   }
 
   Future<void> _solicitarUnirse() async {
+    setState(() {
+      _isInitializing = false;
+      _estaAprobado = false;
+    });
     try {
       await _grupoRepository.solicitarUnirseASesion(sesionId: widget.sesion.id);
 
@@ -512,177 +498,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
     } catch (e) {
       debugPrint('Error al solicitar unirse: $e');
     }
-  }
-
-  /// Carga participantes iniciales de forma síncrona
-  ///
-  /// CRÍTICO: Este método se ejecuta ANTES de suscribirse a streams
-  /// para evitar race condition donde ubicaciones llegan antes que participantes.
-  Future<void> _cargarParticipantesInicial() async {
-    debugPrint('📥 Cargando participantes iniciales...');
-
-    try {
-      final participantes = await _grupoRepository.obtenerParticipantes(
-        widget.sesion.id,
-      );
-
-      if (mounted) {
-        setState(() {
-          _participantesCache = participantes;
-          _participantes = participantes;
-          _participantesMap = {for (final p in participantes) p.usuarioId: p};
-          _participantesReady = true;
-        });
-      }
-
-      debugPrint('✅ ${participantes.length} participantes cargados');
-    } catch (e) {
-      debugPrint('❌ Error al cargar participantes iniciales: $e');
-      // No lanzar error, continuar con lista vacía
-      // El stream actualizará cuando se conecte
-      if (mounted) {
-        setState(() {
-          _participantesReady = true; // Marcar como listo aunque esté vacío
-        });
-      }
-    }
-  }
-
-  void _suscribirseAParticipantes() {
-    debugPrint(
-      '📡 Suscribiendo a stream de participantes para sesión: ${widget.sesion.id}',
-    );
-
-    _participantesSubscription = _grupoRepository
-        .streamParticipantes(widget.sesion.id)
-        .listen(
-          (participantes) async {
-            debugPrint(
-              '🔔 Stream de participantes emitió: ${participantes.length} participantes',
-            );
-
-            // Contar solicitudes pendientes
-            final pendientes =
-                participantes.where((p) => p.estaPendiente).length;
-            final aprobados = participantes.where((p) => p.estaAprobado).length;
-            debugPrint('   📋 Pendientes: $pendientes, Aprobados: $aprobados');
-
-            // Detectar cambios de foto y invalidar cache
-            for (final participante in participantes) {
-              final cached = _participantesMap[participante.usuarioId];
-
-              // Si URL de foto cambió, invalidar cache de ese usuario
-              if (cached != null &&
-                  cached.fotoPerfilUrl != participante.fotoPerfilUrl) {
-                debugPrint(
-                  '🔄 Foto cambiada para ${participante.nombreMostrar}: ${cached.fotoPerfilUrl} → ${participante.fotoPerfilUrl}',
-                );
-                _markerManager.invalidateUser(participante.usuarioId);
-              }
-
-              // Detectar cambios de tracking
-              if (cached != null &&
-                  cached.trackingActivo != participante.trackingActivo) {
-                debugPrint(
-                  '⏸️ Tracking cambiado para ${participante.nombreMostrar}: ${cached.trackingActivo} → ${participante.trackingActivo}',
-                );
-              }
-            }
-
-            // Detectar participantes que abandonaron la sesión y notificar localmente.
-            // Solo si ya teníamos datos previos (evita falsos positivos al cargar).
-            if (_participantesReady && _participantesMap.isNotEmpty) {
-              final prevIds = _participantesMap.keys.toSet();
-              final newIds = {for (final p in participantes) p.usuarioId};
-              final departed = prevIds.difference(newIds);
-              for (final userId in departed) {
-                if (userId == _miUsuarioId)
-                  continue; // El propio usuario salió a propósito
-                final name =
-                    _participantesMap[userId]?.nombreMostrar ??
-                    'Un participante';
-                NotificationService.instance.showLocalSesionNotification(
-                  title: 'Un participante abandonó la sesión',
-                  body: '$name ha abandonado la sesión',
-                );
-              }
-            }
-
-            setState(() {
-              _participantes = participantes;
-              _participantesCache = participantes;
-              // OPTIMIZACIÓN: Crear map para lookup O(1) en _actualizarMarcadores
-              _participantesMap = {
-                for (final p in participantes) p.usuarioId: p,
-              };
-            });
-
-            // PRE-GENERAR MARCADORES: Cargar fotos y crear marcadores inmediatamente
-            // Esto asegura que las fotos estén en cache antes de que lleguen ubicaciones
-            // Nota: No usar await aquí para no bloquear el stream
-            _preGenerarMarcadores(participantes);
-
-            // Buscar mi participante en esta sesión específica
-            // IMPORTANTE: No usar orElse que retorna otro participante
-            // Si el usuario no está en la lista, significa que no ha solicitado unirse
-            ParticipanteSesionModel? miParticipante;
-            try {
-              miParticipante = participantes.firstWhere(
-                (p) => p.usuarioId == _miUsuarioId,
-              );
-            } catch (e) {
-              // Usuario no está en lista de participantes de esta sesión
-              miParticipante = null;
-            }
-
-            // Solo procesar si el usuario ESTÁ en la lista de participantes
-            if (miParticipante != null) {
-              // Capturar en variable local para evitar problema de null-safety en async
-              final participante = miParticipante;
-
-              // Actualizar estado de pausa
-              if (_trackingPausadoPorUsuario != !participante.trackingActivo) {
-                setState(() {
-                  _trackingPausadoPorUsuario = !participante.trackingActivo;
-                });
-              }
-
-              // Si era no aprobado y ahora está aprobado, iniciar tracking
-              if (!_estaAprobado && participante.estaAprobado) {
-                _estaAprobado = true;
-                _iniciarTracking();
-
-                // Solo mostrar mensaje de aprobación si NO es el líder
-                // El líder no necesita "ser aprobado", él crea la sesión
-                if (mounted && !_esLider) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        '¡Has sido aprobado! Compartiendo ubicación...',
-                      ),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                }
-              }
-            }
-
-            // Actualizar marcadores con el último estado del BLoC
-            final trackingState = context.read<MapaTrackingBloc>().state;
-            if (trackingState.ubicaciones.isNotEmpty) {
-              debugPrint(
-                '🔄 Actualizando marcadores con ubicaciones en cache...',
-              );
-              await _actualizarMarcadores(trackingState.ubicaciones);
-            }
-          },
-          onError: (error) {
-            debugPrint('❌ Error en stream de participantes: $error');
-          },
-          onDone: () {
-            debugPrint('✅ Stream de participantes completado');
-          },
-        );
   }
 
   Future<void> _iniciarTracking() async {
@@ -1036,6 +851,20 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   Widget build(BuildContext context) {
     return BlocListener<MapaSesionBloc, MapaSesionState>(
       listener: (context, state) {
+        if (mounted && state.participantes != _participantesCache) {
+          setState(() {
+            _participantes = state.participantes;
+            _participantesCache = state.participantes;
+            _participantesMap = state.participantesMap;
+            _participantesReady = true;
+          });
+          _preGenerarMarcadores(state.participantes);
+          final trackingState = context.read<MapaTrackingBloc>().state;
+          if (trackingState.ubicaciones.isNotEmpty) {
+            _actualizarMarcadores(trackingState.ubicaciones);
+          }
+        }
+
         if (state.status == MapaSesionStatus.ready) {
           if (mounted && (_estaAprobado != state.estaAprobado || _esLider != state.esLider)) {
             setState(() {
