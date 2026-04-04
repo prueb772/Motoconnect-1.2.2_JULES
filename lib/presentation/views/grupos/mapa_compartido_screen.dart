@@ -148,7 +148,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
   bool _estaAprobado = false;
   bool _trackingPausadoPorUsuario = false;
   bool _esAdminGrupo = false;
-  bool _isInitializing = true;
 
   // Panel de participantes embebido (visible/oculto)
   bool _panelParticipantesVisible = false;
@@ -158,9 +157,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
 
   // Ajuste manual del destino compartido (drag del marcador, solo local)
   LatLng? _destinoAjustado;
-
-  String _initializingMessage = 'Inicializando sesión...';
-  double _initializingProgress = 0.0;
 
   // ── Flecha del usuario principal + seguimiento de cámara ──────────────
   BitmapDescriptor? _arrowIcon;
@@ -202,9 +198,20 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
     // Pre-generar icono de flecha para el usuario principal
     _createArrowIcon();
 
-    // Esperar a que el primer frame se renderice antes de inicializar
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _inicializar();
+    // Suscribirse a progreso de navegación y configurar limpieza de marcadores periódica
+    _suscribirseAProgresoNavegacion();
+
+    // Timer para limpieza periódica de cache y diagnóstico
+    Timer.periodic(const Duration(hours: 1), (_) {
+      if (mounted) {
+        final removed = _markerManager.evictStale();
+        if (removed > 0) {
+          debugPrint('🧹 Limpieza periódica: $removed marcadores removidos');
+        }
+
+        // Diagnóstico detallado cada hora
+        _markerManager.printDiagnostics();
+      }
     });
   }
 
@@ -240,111 +247,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
       debugPrint(
         '⏸️ App en segundo plano: foreground service mantiene ubicación activa',
       );
-    }
-  }
-
-  /// Inicialización SECUENCIAL para evitar race conditions
-  ///
-  /// Orden crítico:
-  /// 1. Verificar permisos
-  /// 2. Cargar participantes (con await)
-  /// 3. Pre-generar marcadores (con await)
-  /// 4. Suscribirse a streams
-  /// 5. Iniciar tracking si está aprobado
-  Future<void> _inicializar() async {
-    try {
-      // 1. Verificar permisos (20%)
-      if (mounted) {
-        setState(() {
-          _initializingMessage = 'Verificando permisos...';
-          _initializingProgress = 0.2;
-        });
-      }
-      await _verificarPermisos();
-
-      // 3. Pre-generar marcadores con AWAIT (70%)
-      // OPTIMIZACIÓN: Solo en modo release para evitar bloqueo del hilo principal
-      if (!kDebugMode) {
-        if (mounted) {
-          setState(() {
-            _initializingMessage =
-                'Preparando marcadores (${_participantesCache.length} participantes)...';
-            _initializingProgress = 0.7;
-          });
-        }
-        await _preGenerarMarcadores(_participantesCache);
-        debugPrint('✅ Pre-generación de marcadores completa (modo release)');
-      } else {
-        debugPrint(
-          '⚡ Pre-generación omitida en modo debug para mejor performance',
-        );
-        debugPrint(
-          '   Los marcadores se generarán bajo demanda cuando se actualicen ubicaciones',
-        );
-      }
-
-      // 4. Suscribirse a streams (90%)
-      if (mounted) {
-        setState(() {
-          _initializingMessage = 'Conectando en tiempo real...';
-          _initializingProgress = 0.9;
-        });
-      }
-      _suscribirseAProgresoNavegacion();
-      _suscribirseAEstadoSesion();
-
-      // 5. Timer para limpieza periódica de cache y diagnóstico
-      Timer.periodic(const Duration(hours: 1), (_) {
-        if (mounted) {
-          final removed = _markerManager.evictStale();
-          if (removed > 0) {
-            debugPrint('🧹 Limpieza periódica: $removed marcadores removidos');
-          }
-
-          // Diagnóstico detallado cada hora
-          _markerManager.printDiagnostics();
-        }
-      });
-
-      // 6. Marcar como inicializado
-      if (mounted) {
-        setState(() {
-          _isInitializing = false;
-        });
-      }
-
-      // 7. Iniciar tracking si está aprobado
-      if (_estaAprobado) {
-        _iniciarTracking().catchError((e) {
-          debugPrint('Error al iniciar tracking: $e');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Error al iniciar ubicación: ${e.toString()}'),
-                backgroundColor: Colors.orange,
-                action: SnackBarAction(
-                  label: 'Reintentar',
-                  onPressed: () => _iniciarTracking(),
-                ),
-              ),
-            );
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error en inicialización: $e');
-
-      if (mounted) {
-        setState(() {
-          _isInitializing = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al cargar sesión: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 
@@ -401,103 +303,6 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
             _navigationProgress = progressMap;
           });
         });
-  }
-
-
-  void _suscribirseAEstadoSesion() {
-    // Optimización: Solo el líder de la sesión no necesita escucharse a sí mismo
-    // El admin del grupo SÍ necesita ver el dialog cuando él finaliza la sesión de otro
-    if (_esLider) {
-      debugPrint(
-        '👑 Líder de sesión: No suscribirse a estado de sesión (es quien finaliza)',
-      );
-      return;
-    }
-
-    debugPrint(
-      '📡 Suscribiendo a stream de estado de sesión: ${widget.sesion.id}',
-    );
-
-    _estadoSesionSubscription = _grupoRepository
-        .streamEstadoSesion(widget.sesion.id)
-        .listen(
-          (sesion) async {
-            if (sesion == null) {
-              debugPrint('⚠️ Sesión eliminada de la base de datos');
-              return;
-            }
-
-            debugPrint('🔔 Estado de sesión: ${sesion.estado}');
-
-            if (sesion.estado == EstadoSesion.finalizada) {
-              debugPrint('🛑 Sesión finalizada por el líder');
-
-              // Detener tracking local (await para asegurar que la notificación se cancela)
-              if (_trackingActivo) {
-                _trackingActivo = false;
-                await _trackingService.detenerTracking();
-              }
-
-              // Mostrar dialog
-              if (mounted) {
-                _mostrarDialogSesionFinalizada();
-              }
-            }
-          },
-          onError: (error) {
-            debugPrint('❌ Error en stream de estado de sesión: $error');
-          },
-        );
-  }
-
-  Future<void> _verificarPermisos() async {
-    // Nota: _esLider ya fue seteado en initState() usando datos locales
-    // Esto es más rápido y evita timing issues con la base de datos
-
-    // Ejecutar las 2 queries restantes EN PARALELO
-    final results = await Future.wait([
-      _grupoRepository.esAdminDeGrupo(widget.grupo.id),
-      // Si es líder, ya está auto-aprobado. Si no, verificar en BD
-      _esLider
-          ? Future.value(true)
-          : _grupoRepository.estaAprobadoEnSesion(sesionId: widget.sesion.id),
-    ]);
-
-    setState(() {
-      _esAdminGrupo = results[0];
-      _estaAprobado = results[1];
-    });
-
-    // Si no está aprobado y no es líder, solicitar unirse
-    if (!_estaAprobado && !_esLider) {
-      // Ejecutar en segundo plano sin bloquear
-      _solicitarUnirse().catchError((e) {
-        debugPrint('Error al solicitar unirse: $e');
-      });
-    }
-  }
-
-  Future<void> _solicitarUnirse() async {
-    setState(() {
-      _isInitializing = false;
-      _estaAprobado = false;
-    });
-    try {
-      await _grupoRepository.solicitarUnirseASesion(sesionId: widget.sesion.id);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Solicitud enviada. Esperando aprobación del líder...',
-            ),
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('Error al solicitar unirse: $e');
-    }
   }
 
   Future<void> _iniciarTracking() async {
@@ -906,6 +711,24 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
             }
           }
         }
+
+        if (state.status == MapaSesionStatus.finalizada) {
+          if (mounted) {
+            _mostrarDialogSesionFinalizada();
+          }
+        }
+
+        if (state.status == MapaSesionStatus.permissionsError) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(state.message),
+                backgroundColor: Colors.red,
+              ),
+            );
+            Navigator.pop(context);
+          }
+        }
       },
       child: Scaffold(
       appBar: AppBar(
@@ -968,69 +791,73 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
           _buildNavInfoBottomBar(),
           // Panel de participantes embebido (se reconstruye con setState)
           _buildPanelParticipantesOverlay(),
-          // Overlay de carga durante inicialización
-        BlocConsumer<MapaTrackingBloc, MapaTrackingState>(
-          listenWhen: (previous, current) => previous.ubicaciones != current.ubicaciones,
-          listener: (context, trackingState) {
-            if (mounted) {
-              _actualizarMarcadores(trackingState.ubicaciones);
-            }
-          },
-          builder: (context, trackingState) {
-            if (trackingState.conexionPerdida || trackingState.mostrarMensajeRestablecida) {
-              return _buildBannerConexion(trackingState.conexionPerdida);
-            }
-            return const SizedBox.shrink();
-          },
-        ),
-          if (_isInitializing)
-            Container(
-              color: Colors.black.withValues(alpha: 0.5),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 80,
-                      height: 80,
-                      child: CircularProgressIndicator(
-                        value: _initializingProgress,
-                        strokeWidth: 6,
-                        valueColor: const AlwaysStoppedAnimation<Color>(
-                          Colors.teal,
-                        ),
-                        backgroundColor: Colors.white.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      _initializingMessage,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${(_initializingProgress * 100).toInt()}%',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          // Overlay de espera de aprobación (solo para participantes NO aprobados)
+          // Banner de conexión
+          BlocConsumer<MapaTrackingBloc, MapaTrackingState>(
+            listenWhen: (previous, current) => previous.ubicaciones != current.ubicaciones,
+            listener: (context, trackingState) {
+              if (mounted) {
+                _actualizarMarcadores(trackingState.ubicaciones);
+              }
+            },
+            builder: (context, trackingState) {
+              if (trackingState.conexionPerdida || trackingState.mostrarMensajeRestablecida) {
+                return _buildBannerConexion(trackingState.conexionPerdida);
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+
+          // Overlay de carga y estado de sesión controlado 100% por el BLoC
           BlocBuilder<MapaSesionBloc, MapaSesionState>(
             builder: (context, state) {
-              if (state.status == MapaSesionStatus.esperandoAprobacion ||
-                  (!state.estaAprobado && !state.esLider && !_isInitializing)) {
+              if (state.status == MapaSesionStatus.loading) {
+                return Container(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 80,
+                          height: 80,
+                          child: CircularProgressIndicator(
+                            value: state.progress,
+                            strokeWidth: 6,
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                              Colors.teal,
+                            ),
+                            backgroundColor: Colors.white.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          state.message,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${(state.progress * 100).toInt()}%',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              // Overlay de espera de aprobación
+              if (state.status == MapaSesionStatus.esperandoAprobacion) {
                 return _buildPantallaEspera(state);
               }
+
               return const SizedBox.shrink();
             },
           ),

@@ -746,14 +746,20 @@ class GrupoRepositoryImpl implements GrupoRepository {
         })
         .eq('id', participanteId);
 
-    // Obtener info completa del participante desde la vista
-    final participante = await _supabase
-        .from('vista_participantes_sesion')
-        .select()
+    // Obtener info completa del participante con join a usuarios
+    final participanteData = await _supabase
+        .from('participantes_sesion')
+        .select('*, usuarios(nombre, apodo, foto_perfil_url)')
         .eq('id', participanteId)
         .single();
 
-    return ParticipanteSesionModel.fromJson(participante);
+    final usuario = participanteData['usuarios'] ?? {};
+    return ParticipanteSesionModel.fromJson({
+      ...participanteData,
+      'nombre': usuario['nombre'],
+      'apodo': usuario['apodo'],
+      'foto_perfil_url': usuario['foto_perfil_url'],
+    });
   }
 
   @override
