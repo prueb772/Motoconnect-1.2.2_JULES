@@ -180,9 +180,17 @@ class ParticipanteSesionModel {
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is ParticipanteSesionModel && other.id == id;
+    return other is ParticipanteSesionModel &&
+        other.id == id &&
+        other.estadoAprobacion == estadoAprobacion &&
+        other.trackingActivo == trackingActivo &&
+        other.conexionPerdida == conexionPerdida;
   }
 
   @override
-  int get hashCode => id.hashCode;
+  int get hashCode =>
+      id.hashCode ^
+      estadoAprobacion.hashCode ^
+      trackingActivo.hashCode ^
+      conexionPerdida.hashCode;
 }

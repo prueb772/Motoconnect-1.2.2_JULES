@@ -677,7 +677,16 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
               _esLider = state.esLider;
             });
             if (_estaAprobado) {
-              _iniciarTracking().catchError((e) {
+              _iniciarTracking().then((_) {
+                // Una vez que el tracking ha iniciado, si ya hay una ruta, calcularla.
+                if (mounted && _rutaCompartida != null) {
+                  debugPrint('🗺️ Calculando polyline hacia destino post-tracking...');
+                  _calcularPolylineHaciaDestinoConRetry(
+                    _rutaCompartida!.destinoLat,
+                    _rutaCompartida!.destinoLng,
+                  );
+                }
+              }).catchError((e) {
                 debugPrint('Error al iniciar tracking por listener: $e');
               });
             }
@@ -690,13 +699,13 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
               _destinoAjustado = null;
             });
 
-            if (ruta != null && _estaAprobado) {
+            if (ruta != null && _estaAprobado && _trackingActivo) {
               debugPrint('🗺️ Calculando polyline hacia destino con retry...');
               _calcularPolylineHaciaDestinoConRetry(
                 ruta.destinoLat,
                 ruta.destinoLng,
               );
-            } else {
+            } else if (ruta == null) {
               debugPrint('🧹 Limpiando polyline (estado de ruta emitió null)');
               if (_navigationSteps != null) {
                 _detenerNavegacionPorVoz();
@@ -856,6 +865,45 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
               // Overlay de espera de aprobación
               if (state.status == MapaSesionStatus.esperandoAprobacion) {
                 return _buildPantallaEspera(state);
+              }
+
+              // Overlay de error (no dejar el mapa accesible)
+              if (state.status == MapaSesionStatus.error) {
+                return Container(
+                  color: Colors.white,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Error',
+                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            state.message,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey[700]),
+                          ),
+                          const SizedBox(height: 24),
+                          ElevatedButton.icon(
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.arrow_back),
+                            label: const Text('Volver'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
               }
 
               return const SizedBox.shrink();
@@ -1070,74 +1118,78 @@ class _MapaCompartidoScreenState extends State<MapaCompartidoScreen>
       return;
     }
 
-    final pendientes = _participantes.where((p) => p.estaPendiente).toList();
-
     showDialog(
       context: context,
       builder:
-          (context) => SolicitudesPendientesDialog(
-            solicitudes: pendientes,
-            onAprobar: (participanteId) async {
-              // Doble validación por seguridad
-              if (!_esLider) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Solo el líder puede aprobar participantes.',
-                      ),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-                return;
-              }
+          (dialogContext) => BlocBuilder<MapaSesionBloc, MapaSesionState>(
+            builder: (context, state) {
+              final pendientes = state.participantes.where((p) => p.estaPendiente).toList();
 
-              try {
-                await _grupoRepository.aprobarParticipante(
-                  participanteId: participanteId,
-                );
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error al aprobar: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
-            onRechazar: (participanteId) async {
-              // Doble validación por seguridad
-              if (!_esLider) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Solo el líder puede rechazar participantes.',
-                      ),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-                return;
-              }
+              return SolicitudesPendientesDialog(
+                solicitudes: pendientes,
+                onAprobar: (participanteId) async {
+                  // Doble validación por seguridad
+                  if (!_esLider) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Solo el líder puede aprobar participantes.',
+                          ),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                    return;
+                  }
 
-              try {
-                await _grupoRepository.rechazarParticipante(
-                  participanteId: participanteId,
-                );
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error al rechazar: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              }
+                  try {
+                    await _grupoRepository.aprobarParticipante(
+                      participanteId: participanteId,
+                    );
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Error al aprobar: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                },
+                onRechazar: (participanteId) async {
+                  // Doble validación por seguridad
+                  if (!_esLider) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Solo el líder puede rechazar participantes.',
+                          ),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                    return;
+                  }
+
+                  try {
+                    await _grupoRepository.rechazarParticipante(
+                      participanteId: participanteId,
+                    );
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Error al rechazar: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                },
+              );
             },
           ),
     );
