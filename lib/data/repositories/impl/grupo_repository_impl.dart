@@ -653,31 +653,79 @@ class GrupoRepositoryImpl implements GrupoRepository {
   Future<List<ParticipanteSesionModel>> obtenerParticipantes(
     String sesionId,
   ) async {
-    final response = await _supabase
-        .from('vista_participantes_sesion')
+    final participantesData = await _supabase
+        .from('participantes_sesion')
         .select()
         .eq('sesion_id', sesionId)
         .order('fecha_solicitud');
 
-    return (response as List)
-        .map((json) => ParticipanteSesionModel.fromJson(json))
+    if ((participantesData as List).isEmpty) {
+      return [];
+    }
+
+    final userIds = participantesData
+        .map((p) => p['usuario_id'] as String)
+        .toSet()
         .toList();
+
+    final usuarios = await _supabase
+        .from('usuarios')
+        .select('id, nombre, apodo, foto_perfil_url')
+        .inFilter('id', userIds);
+
+    final usuariosMap = <String, dynamic>{
+      for (final u in usuarios) u['id']: u
+    };
+
+    return participantesData.map((p) {
+      final usuario = usuariosMap[p['usuario_id']] ?? {};
+      return ParticipanteSesionModel.fromJson({
+        ...p,
+        'nombre': usuario['nombre'],
+        'apodo': usuario['apodo'],
+        'foto_perfil_url': usuario['foto_perfil_url'],
+      });
+    }).toList();
   }
 
   @override
   Future<List<ParticipanteSesionModel>> obtenerParticipantesAprobados(
     String sesionId,
   ) async {
-    final response = await _supabase
-        .from('vista_participantes_sesion')
+    final participantesData = await _supabase
+        .from('participantes_sesion')
         .select()
         .eq('sesion_id', sesionId)
         .eq('estado_aprobacion', 'aprobado')
         .order('fecha_aprobacion');
 
-    return (response as List)
-        .map((json) => ParticipanteSesionModel.fromJson(json))
+    if ((participantesData as List).isEmpty) {
+      return [];
+    }
+
+    final userIds = participantesData
+        .map((p) => p['usuario_id'] as String)
+        .toSet()
         .toList();
+
+    final usuarios = await _supabase
+        .from('usuarios')
+        .select('id, nombre, apodo, foto_perfil_url')
+        .inFilter('id', userIds);
+
+    final usuariosMap = <String, dynamic>{
+      for (final u in usuarios) u['id']: u
+    };
+
+    return participantesData.map((p) {
+      final usuario = usuariosMap[p['usuario_id']] ?? {};
+      return ParticipanteSesionModel.fromJson({
+        ...p,
+        'nombre': usuario['nombre'],
+        'apodo': usuario['apodo'],
+        'foto_perfil_url': usuario['foto_perfil_url'],
+      });
+    }).toList();
   }
 
   @override
